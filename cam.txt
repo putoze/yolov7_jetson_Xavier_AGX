@@ -1,0 +1,1 @@
+v4l2src device=/dev/video1 ! video/x-raw, width=1280, height=722, format=GRAY16_LE ! autovideoconvert ! appsink
