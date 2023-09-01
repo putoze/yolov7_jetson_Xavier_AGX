@@ -1,4 +1,40 @@
-#!/bin/sh
+!/bin/sh
+echo ""
+echo "Hello, choose the env you want it~"
+echo [0]: JetsonYoloV7-TensorRT
+echo ----------------
+echo [1]: yolov3_tenrt
+echo ----------------
+echo [2]: None
+echo ----------------
+echo -n "Press enter to start it:"
+
+read ENV_Set
+
+#============================================================================
+if [ $ENV_Set -eq 0 ] ; then
+    source activate
+    conda activate JetsonYoloV7-TensorRT   
+
+    echo ============
+    echo 「Success Enter JetsonYoloV7-TensorRT」
+    echo ============ 
+fi
+
+#============================================================================
+
+if [ $ENV_Set -eq 1 ] ; then
+    source activate
+    conda activate yolov3_tenrt
+
+    echo ============
+    echo 「Success Enter yolov3_tenrt」
+    echo ============
+fi
+
+# [./darknet] --> [./home/lab716/Desktop/Rain/darknet/darknet]
+#============================================================================ 
+
 echo ""
 echo "Hello, choose the mode you want it~"
 echo ------ Tensorrt Demo ------
@@ -14,7 +50,6 @@ echo -n "Press enter to start it:"
 
 read MY_mode
 
-# [./darknet] --> [./home/lab716/Desktop/Rain/darknet/darknet]
 #============================================================================ 
 
 if [ $MY_mode -eq 0 ] ; then
@@ -23,10 +58,11 @@ if [ $MY_mode -eq 0 ] ; then
     echo ============
 
     python detect.py \
-    --weight ./torch_yolov7_weight/yolov7-custom_v3/best.pt \
+    --weight ./torch_yolov7_weight/yolov7-tiny-20230831-five-direct/yolov7-tiny-20230831-five-direct.pt \
     --conf 0.5 \
     --img-size 640 \
-    --source cam.txt
+    --source cam.txt 
+    # --weight ./torch_yolov7_weight/yolov7-custom_v3/best.pt \
     
 fi
 
@@ -53,7 +89,7 @@ if [ $MY_mode -eq 2 ] ; then
     echo ============
 
     python export.py \
-    --weight ./torch_yolov7_weight/yolov7-custom_v3/best.pt \
+    --weight ./torch_yolov7_weight/yolov7_tiny_coco/yolov7-tiny.pt \
     --grid \
     --end2end --simplify \
     --topk-all 100 \
@@ -73,8 +109,8 @@ if [ $MY_mode -eq 3 ] ; then
     echo ============
 
     python ./tensorrt-python/export.py \
-    -o runs/train/yolov7-custom_v2/weights/best.onnx \
-    -e runs/train/yolov7-custom_v2/weights/best-nms.trt \
+    -o torch_yolov7_weight/yolov7_tiny_coco/yolov7-tiny.onnx \
+    -e torch_yolov7_weight/yolov7_tiny_coco/yolov7-tiny.trt \
     -p fp16
     #--view-img \
     #--no-trace
@@ -82,36 +118,7 @@ fi
 
 #============================================================================ 
 
-if [ $MY_mode -eq 4 ] ; then
-    echo ============
-    echo 「otocam mtcnn」
-    echo ============
-    python3 trt_mtcnn.py --gstr 1
 
-fi
-
-#============================================================================ 
-
-if [ $MY_mode -eq 5 ] ; then
-    echo ============
-    echo 「Video tensorrt demo with yolov3-tiny-mid_eyetracker」
-    echo ============
-    python3 trt_yolo.py \
-    -m ./mid-track-owl/yolov3-tiny-mid_eyetracker \
-    --video ./../tensor_test.avi -c 5 -t 0.8 #--width 1280 --height 722
-
-fi
-
-#============================================================================ 
-
-if [ $MY_mode -eq 6 ] ; then
-    echo ============
-    echo 「map tensorrt demo with yolov3-tiny-mid_eyetracker」
-    echo ============
-    python3 eval_yolo.py \
-    -m ./mid-track-owl/yolov3-tiny-mid_eyetracker 
-
-fi
 
 #============================================================================ End
 echo [===YOLO===] ok!
