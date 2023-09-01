@@ -8,16 +8,26 @@ import os
 import time
 import argparse
 import sys
-
+from pathlib import Path
 
 import cv2
 import pycuda.autoinit  # This is needed for initializing CUDA driver
+import torch
+import torch.backends.cudnn as cudnn
 import numpy as np
+from numpy import random
 import imutils
 
 from utils_ten.camera import add_camera_args, Camera
 from utils_ten.display import open_window, set_display, show_fps
 from utils_ten.fitEllipse import find_max_Thresh
+
+from models.experimental import attempt_load
+from utils.datasets import LoadStreams, LoadImages
+from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
+    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path
+from utils.plots import plot_one_box
+from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
 
 WINDOW_NAME = 'TrtYOLODemo'
 
@@ -28,18 +38,25 @@ def parse_args():
             'YOLO model on Jetson')
     parser = argparse.ArgumentParser(description=desc)
     parser = add_camera_args(parser)
-    parser.add_argument(
-        '-t', '--conf_thresh', type=float, default=0.5,
-        help='set the detection confidence threshold')
-    # parser.add_argument(
-    #     '-m', '--model', type=str, required=True,
-    #     help=('[yolov3-tiny|yolov3|yolov3-spp|yolov4-tiny|yolov4|'
-    #           'yolov4-csp|yolov4x-mish|yolov4-p5]-[{dimension}], where '
-    #           '{dimension} could be either a single number (e.g. '
-    #           '288, 416, 608) or 2 numbers, WxH (e.g. 416x256)'))
-    # parser.add_argument(
-    #     '-l', '--letter_box', action='store_true',
-    #     help='inference with letterboxed image [False]')
+    parser.add_argument('--weights', nargs='+', type=str, default='yolov7.pt', help='model.pt path(s)')
+    parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
+    parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
+    parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
+    parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')
+    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--view-img', action='store_true', help='display results')
+    parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
+    parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
+    parser.add_argument('--nosave', action='store_true', help='do not save images/videos')
+    parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
+    parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
+    parser.add_argument('--augment', action='store_true', help='augmented inference')
+    parser.add_argument('--update', action='store_true', help='update all models')
+    parser.add_argument('--project', default='runs/detect', help='save results to project/name')
+    parser.add_argument('--name', default='exp', help='save results to project/name')
+    parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
+    parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
+
     args = parser.parse_args()
     return args
 
@@ -73,7 +90,7 @@ def affineMatrix_eye(img, boxes, landmarks, scale=2.5):
 
     return align_eye 
 
-def loop_and_detect(cam, model):
+def loop_and_detect(cam, args):
     """Continuously capture images from camera and do object detection.
 
     # Arguments
@@ -120,6 +137,34 @@ def loop_and_detect(cam, model):
     print("-------------------------------")
     print("")
 
+    source, weights, view_img, save_txt, imgsz, trace = args.source, args.weights, args.view_img, args.save_txt, args.img_size, not args.no_trace
+    save_img = not args.nosave and not source.endswith('.txt')  # save inference images
+
+    # Initialize
+    set_logging()
+    device = select_device(args.device)
+    half = device.type != 'cpu'  # half precision only supported on CUDA
+
+    # Load model
+    model = attempt_load(weights, map_location=device)  # load FP32 model
+    stride = int(model.stride.max())  # model stride
+    imgsz = check_img_size(imgsz, s=stride)  # check img_size
+
+    if trace:
+        model = TracedModel(model, device, args.img_size)
+
+    if half:
+        model.half()  # to FP16
+
+    names = model.module.names if hasattr(model, 'module') else model.names
+    colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
+
+    # Run inference
+    if device.type != 'cpu':
+        model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
+    old_img_w = old_img_h = imgsz
+    old_img_b = 1
+
     while True:
         if cv2.getWindowProperty(WINDOW_NAME, 0) < 0:
             break
@@ -129,8 +174,44 @@ def loop_and_detect(cam, model):
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         if img is None:
             break
-        #img = imutils.resize(img, width=640)
-        detections, t = model.Inference(img)
+
+        img = torch.from_numpy(img).to(device)
+        img = img.half() if half else img.float()  # uint8 to fp16/32
+        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        if img.ndimension() == 3:
+            img = img.unsqueeze(0)
+
+        # Warmup
+        if device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
+            old_img_b = img.shape[0]
+            old_img_h = img.shape[2]
+            old_img_w = img.shape[3]
+            for i in range(3):
+                model(img, augment=args.augment)[0]
+
+        with torch.no_grad():   # Calculating gradients would cause a GPU memory leak
+            pred = model(img, augment=args.augment)[0]
+
+        #Apply NMS
+        pred = non_max_suppression(pred, args.conf_thres, args.iou_thres, classes=args.classes, agnostic=args.agnostic_nms)
+
+        for i, det in enumerate(pred):  # detections per image
+            gn = torch.tensor(img.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            if len(det):
+                # Rescale boxes from img_size to im0 size
+                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], img.shape).round()
+
+                # Print results
+                for c in det[:, -1].unique():
+                    n = (det[:, -1] == c).sum()  # detections per class
+                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+
+                for *xyxy, conf, cls in reversed(det):
+                    if save_img or view_img:  # Add bbox to image
+                        label = f'{names[int(cls)]} {conf:.2f}'
+                        plot_one_box(xyxy, img, label=label, color=colors[int(cls)], line_thickness=1)
+
+
         # write my self code
         #(img, text, org, fontFace, fontScale, color, thickness, lineType)
         # Write the user guide interface
@@ -326,13 +407,11 @@ def main():
     if not cam.isOpened():
         raise SystemExit('ERROR: failed to open camera!')
 
-    model = YoloTRT(library="yolov7/build/libmyplugins.so", 
-                    engine="yolov7/build/yolov7-tiny-20230831-five-direct.engine", conf=args.conf_thresh, yolo_ver="v7")
-    
     open_window(
         WINDOW_NAME, 'Camera TensorRT YOLO Demo',
         cam.img_width, cam.img_height)
-    loop_and_detect(cam, model)
+
+    loop_and_detect(cam,args)
 
     cam.release()
     cv2.destroyAllWindows()

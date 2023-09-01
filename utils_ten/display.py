@@ -7,11 +7,12 @@ import time
 import cv2
 
 
-def open_window(window_name, width=None, height=None):
+def open_window(window_name, title, width=None, height=None):
     """Open the display window."""
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN,
-                              cv2.WINDOW_FULLSCREEN)
+    cv2.setWindowTitle(window_name, title)
+    if width and height:
+        cv2.resizeWindow(window_name, width, height)
 
     if width and height:
         cv2.resizeWindow(window_name, width, height)

@@ -54,6 +54,7 @@ def add_camera_args(parser):
                         help='determine save img path')
     parser.add_argument('--save_record', type=str, default='./save_img/save_record',
                         help='determine save video path')
+    
     return parser
 
 
@@ -150,7 +151,7 @@ class Camera():
     5. Jetson onboard camera
     """
 
-    def __init__(self, args):
+    def __init__(self, args, stride=32, img_size=640):
         self.args = args
         self.is_opened = False
         self.video_file = ''
@@ -163,6 +164,8 @@ class Camera():
         self.img_height = args.height
         self.cap = None
         self.thread = None
+        self.stride = stride
+        self.img_size = img_size
         self._open()  # try to open the camera
 
     def _open(self):
@@ -203,6 +206,38 @@ class Camera():
             self._start()
         else:
             raise RuntimeError('no camera type specified!')
+        
+    def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True, stride=32):
+        # Resize and pad image while meeting stride-multiple constraints
+        shape = img.shape[:2]  # current shape [height, width]
+        if isinstance(new_shape, int):
+            new_shape = (new_shape, new_shape)
+
+        # Scale ratio (new / old)
+        r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+        if not scaleup:  # only scale down, do not scale up (for better test mAP)
+            r = min(r, 1.0)
+
+        # Compute padding
+        ratio = r, r  # width, height ratios
+        new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
+        dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
+        if auto:  # minimum rectangle
+            dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # wh padding
+        elif scaleFill:  # stretch
+            dw, dh = 0.0, 0.0
+            new_unpad = (new_shape[1], new_shape[0])
+            ratio = new_shape[1] / shape[1], new_shape[0] / shape[0]  # width, height ratios
+
+        dw /= 2  # divide padding into 2 sides
+        dh /= 2
+
+        if shape[::-1] != new_unpad:  # resize
+            img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
+        top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+        left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+        img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
+        return img, ratio, (dw, dh)
 
     def isOpened(self):
         return self.is_opened
@@ -236,6 +271,11 @@ class Camera():
             self.thread_running = True
             self.thread = threading.Thread(target=grab_img, args=(self,))
             self.thread.start()
+            # check for common shapes
+            self.letterbox(self.img_handle, self.img_size, stride=self.stride)  # shapes
+            self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
+            if not self.rect:
+                print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
 
     def _stop(self):
         if self.thread_running:
