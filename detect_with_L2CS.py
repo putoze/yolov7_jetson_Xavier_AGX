@@ -124,7 +124,8 @@ def detect(save_img=False):
     arch='ResNet50'
     batch_size = 1
     gpu = select_device(opt.device, batch_size=batch_size)
-    snapshot_path = 'models/Gaze360/L2CSNet_gaze360.pkl'
+    snapshot_path = '../L2CS-Net-models/Gaze360/L2CSNet_gaze360.pkl'
+    # snapshot_path = '../L2CS-Net-models/MPIIGaze/fold0.pkl'
 
     transformations = transforms.Compose([
         transforms.Resize(448),

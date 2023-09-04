@@ -40,6 +40,8 @@ echo [0]: yolov7-tiny-20230831-five-direct.pt
 echo ----------------
 echo [1]: yolov7-tiny-11class-894epoch.pt
 echo ----------------
+echo [2]: yolov7-w6-pose.pt
+echo ----------------
 echo -n "Press enter to start it:"
 
 read MY_Weights
@@ -49,6 +51,9 @@ if [ $MY_Weights -eq 0 ] ; then
 fi 
 if [ $MY_Weights -eq 1 ] ; then
     Weights='yolov7-tiny-11class-894epoch.pt'
+fi 
+if [ $MY_Weights -eq 2 ] ; then
+    Weights='yolov7-w6-pose.pt'
 fi 
 
 echo $Weights
@@ -68,6 +73,10 @@ echo ----------------
 echo [3]: Video  detect + L2CS
 echo ----------------
 echo [4]: Image  detect + L2CS
+echo ----------------
+echo [5]: Video  detect + pose
+echo ----------------
+echo [6]: otocam  detect + landmark
 echo ----------------
 echo -n "Press enter to start it:"
 
@@ -100,7 +109,7 @@ if [ $MY_mode -eq 1 ] ; then
     --conf 0.5 \
     --img-size 640 \
     --source /home/joe/Desktop/Camera_oToCAM250/2023_0816_otocam_datavideo/output29.avi \
-    --view-img
+    --view-img 
     #--no-trace
 fi
 
@@ -155,6 +164,37 @@ if [ $MY_mode -eq 4 ] ; then
     --img-size 640 \
     --source ./test_image/frank \
     --view-img
+fi
+
+#============================================================================ 
+
+if [ $MY_mode -eq 5 ] ; then
+    echo ============
+    echo 「Video detect pose」
+    echo ============
+
+    python detect_pose.py \
+    --weights ../torch_yolov7_weight/$Weights \
+    --conf 0.05 --iou-thres 0.65 \
+    --img-size 1280 \
+    --source /home/joe/Desktop/Camera_oToCAM250/2023_0816_otocam_datavideo/output29.avi \
+    --no-trace 
+
+fi
+
+#============================================================================ 
+
+if [ $MY_mode -eq 6 ] ; then
+    echo ============
+    echo 「otocam detect landmark」
+    echo ============
+
+    python detect_landmark.py \
+    --weight ../torch_yolov7_weight/$Weights \
+    --conf 0.5 \
+    --img-size 640 \
+    --source cam.txt \
+    --no-trace 
 fi
 
 #============================================================================ 
