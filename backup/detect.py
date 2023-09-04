@@ -26,7 +26,7 @@ def detect(save_img=False):
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
     
     full_scrn = False
-    open_window(WINDOW_NAME)
+    # open_window(WINDOW_NAME)
 
     # Directories
     save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run

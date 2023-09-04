@@ -26,7 +26,7 @@ def detect(save_img=False):
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
     
     full_scrn = False
-    open_window(WINDOW_NAME)
+    # open_window(WINDOW_NAME)
 
     # Directories
     save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
@@ -136,7 +136,10 @@ def detect(save_img=False):
                     if save_img or view_img:  # Add bbox to image
                         label = f'{names[int(cls)]} {conf:.2f}'
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
-
+                        fps = 1.0 / (t2 - t1)
+                        # fps = curr_fps if fps == 0.0 else (fps*0.95 + curr_fps*0.05)
+                        im0 = show_fps(im0, fps)
+                        
             # Print time (inference + NMS)
             print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
 
@@ -144,9 +147,6 @@ def detect(save_img=False):
             if view_img:
                 # if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_AUTOSIZE) < 0:
                 #     break
-                fps = 1.0 / (t2 - t1)
-                # fps = curr_fps if fps == 0.0 else (fps*0.95 + curr_fps*0.05)
-                im0 = show_fps(im0, fps)
                 cv2.imshow(WINDOW_NAME, im0)
                 key = cv2.waitKey(1)
                 # cv2.imshow(str(p), im0)
@@ -158,10 +158,10 @@ def detect(save_img=False):
                     print("")
                     cv2.destroyAllWindows()
                     return 0
-                elif key == ord('F') or key == ord('f'):  # Toggle fullscreen
-                    full_scrn = not full_scrn
-                    # print(full_scrn)
-                    set_display(WINDOW_NAME, full_scrn)
+                # elif key == ord('F') or key == ord('f'):  # Toggle fullscreen
+                #     full_scrn = not full_scrn
+                #     # print(full_scrn)
+                #     set_display(WINDOW_NAME, full_scrn)
                     
 
             # Save results (image with detections)

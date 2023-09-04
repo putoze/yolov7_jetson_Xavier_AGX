@@ -6,6 +6,7 @@ import cv2
 import torch
 import torch.backends.cudnn as cudnn
 from numpy import random
+import numpy as np
 
 import torch.nn as nn
 from utils_ten.display import open_window, show_fps, set_display
@@ -18,6 +19,7 @@ from utils_L2CS import draw_gaze
 from PIL import Image, ImageOps
 
 from model_L2CS import L2CS
+from process_alg.fitEllipse import find_max_Thresh
 
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
@@ -45,6 +47,23 @@ def getArch(arch,bins):
                 'The default value of ResNet50 will be used instead!')
         model = L2CS( torchvision.models.resnet.Bottleneck, [3, 4, 6,  3], bins)
     return model
+
+
+def pupil_fit(img,pupil,flag_list):
+    #(Gray,Binary,Morphological,Gaussian blur,Sobel,Canny,Find contours)
+    margin = 0
+    input_eye_img = img[pupil[1]-margin:pupil[3]+margin,pupil[0]-margin:pupil[2]+margin,:]
+    elPupilThresh = find_max_Thresh(input_eye_img,flag_list)
+    if elPupilThresh != None:
+        # update elPupilThresh into golbal image
+        center = (int(elPupilThresh[0][0] + pupil[0]), int(elPupilThresh[0][1] + pupil[1]))
+        new_elPupilThresh_left = (center,elPupilThresh[1],elPupilThresh[2])
+        cv2.ellipse(img, new_elPupilThresh_left, (0, 255, 0), 2)
+        cv2.circle(img, center, 3, (0, 0, 255), -1)
+        # resize image into top left corner
+        return center
+    else:
+        return 0
 
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
@@ -102,10 +121,10 @@ def detect(save_img=False):
 
     # L2CS-Net
     cudnn.enabled = True
-    arch=opt.arch
+    arch='ResNet50'
     batch_size = 1
     gpu = select_device(opt.device, batch_size=batch_size)
-    snapshot_path = opt.snapshot
+    snapshot_path = 'models/Gaze360/L2CSNet_gaze360.pkl'
 
     transformations = transforms.Compose([
         transforms.Resize(448),
@@ -116,12 +135,12 @@ def detect(save_img=False):
         )
     ])
     
-    model=getArch(arch, 90)
+    modelL2CS=getArch(arch, 90)
     print('Loading snapshot.')
     saved_state_dict = torch.load(snapshot_path)
-    model.load_state_dict(saved_state_dict)
-    model.cuda(gpu)
-    model.eval()
+    modelL2CS.load_state_dict(saved_state_dict)
+    modelL2CS.cuda(gpu)
+    modelL2CS.eval()
 
     softmax = nn.Softmax(dim=1)
     # detector = RetinaFace(gpu_id=0)
@@ -129,6 +148,27 @@ def detect(save_img=False):
     idx_tensor = torch.FloatTensor(idx_tensor).cuda(gpu)
     x=0
     # End L2CS-Net
+
+    # Self-define global parameter
+    # ---------------------------
+    # ------ face imformation ------
+    nose_center_point = (0,0)
+    mouse_center_point = (0,0)
+    left_center = (0,0)
+    right_center = (0,0)
+    eye_w_roi = 100
+    eye_h_roi = 50
+    face_roi = 200
+    driver_face_roi = [0,100,0,100]
+    #------ put txt ------
+    base_txt_height = 35
+    gap_txt_height = 35
+    len_width = 400
+    #------ eye img ------
+    right_eye_img = cv2.imread("./test_image/eye/3.png")  
+    right_eye_img = cv2.resize(right_eye_img,(eye_w_roi,eye_h_roi))
+    left_eye_img = cv2.imread("./test_image/eye/2.png")  
+    left_eye_img = cv2.resize(left_eye_img,(eye_w_roi,eye_h_roi))
 
     t0 = time.time()
     for path, img, im0s, vid_cap in dataset:
@@ -173,6 +213,7 @@ def detect(save_img=False):
             save_path = str(save_dir / p.name)  # img.jpg
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -181,6 +222,104 @@ def detect(save_img=False):
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+
+
+                # ------- Main Algorithm ------
+                face_max = 0
+                eye_right = []
+                eye_left  = []
+                pupil_left = []
+                pupil_right = []
+
+                # find driver face
+                for *xyxy, conf, cls in reversed(det):
+                    if names[int(cls)] == 'face':
+                        bb = [int(x) for x in xyxy]
+                        face_area = (bb[2] - bb[0])*(bb[3]-bb[1])
+                        if(face_area > face_max) :
+                            face_max = face_area
+                            driver_face_roi = bb
+
+                # find all boundary of face     
+                for *xyxy, conf, cls in reversed(det):
+                    bb = [int(x) for x in xyxy]
+                    center = (bb[0]+(bb[2]-bb[0])/2,bb[1]+(bb[3]-bb[1])/2)
+                    if (center[0] > driver_face_roi[0] and center[0] < driver_face_roi[2]) \
+                    and (center[1] > driver_face_roi[1] and center[1] < driver_face_roi[3]):
+                        if names[int(cls)] == 'eye' and bb[3] < nose_center_point[1]:
+                            if (center[0] < nose_center_point[0] or center[0] < mouse_center_point[0]):
+                                eye_left = bb
+                            else:
+                                eye_right = bb
+                        if names[int(cls)] == 'pupil' and bb[3] < nose_center_point[1]:
+                            if (center[0] < nose_center_point[0]
+                            or center[0] < mouse_center_point[0]):
+                                pupil_left = bb
+                            else :
+                                pupil_right = bb
+                        if names[int(cls)] == 'nose' :
+                            nose_center_point = center
+                        if names[int(cls)] == 'mouse':
+                            mouse_center_point = center
+
+                # L2CS-Net
+                x_min,y_min,x_max,y_max = driver_face_roi
+                bbox_width = x_max - x_min
+                bbox_height = y_max - y_min
+                # x_min = max(0,x_min-int(0.2*bbox_height))
+                # y_min = max(0,y_min-int(0.2*bbox_width))
+                # x_max = x_max+int(0.2*bbox_height)
+                # y_max = y_max+int(0.2*bbox_width)
+                # bbox_width = x_max - x_min
+                # bbox_height = y_max - y_mi    
+                # Crop image
+
+                img_L2CS = im0[y_min:y_max, x_min:x_max]
+                img_L2CS = cv2.resize(img_L2CS, (224, 224))
+                img_L2CS = cv2.cvtColor(img_L2CS, cv2.COLOR_BGR2RGB)
+                im_pil = Image.fromarray(img_L2CS)
+                img_L2CS =transformations(im_pil)
+                img_L2CS  = Variable(img_L2CS).cuda(gpu)
+                img_L2CS  = img_L2CS.unsqueeze(0) 
+
+                # gaze prediction
+                gaze_pitch, gaze_yaw = modelL2CS(img_L2CS)
+
+                pitch_predicted = softmax(gaze_pitch)
+                yaw_predicted = softmax(gaze_yaw)
+
+                # Get continuous predictions in degrees.
+                pitch_predicted = torch.sum(pitch_predicted.data[0] * idx_tensor) * 4 - 180
+                yaw_predicted = torch.sum(yaw_predicted.data[0] * idx_tensor) * 4 - 180
+
+                pitch_predicted= pitch_predicted.cpu().detach().numpy()* np.pi/180.0
+                yaw_predicted= yaw_predicted.cpu().detach().numpy()* np.pi/180. 
+                
+                    
+                draw_gaze(x_min,y_min,bbox_width, bbox_height,im0,(pitch_predicted,yaw_predicted),color=(0,0,255))
+                cv2.rectangle(im0, (x_min, y_min), (x_max, y_max), (0,255,0), 1)
+
+                # End L2CS-Net
+
+                # pupil left
+                flag_list = [1,1,1,1,1,1,1]
+                if len(pupil_left) > 0:
+                    left_center = pupil_fit(im0,pupil_left,flag_list)
+                # pupil right
+                if len(pupil_right) > 0:
+                    right_center = pupil_fit(im0,pupil_right,flag_list)
+                if len(eye_left) > 0:
+                    # print("eye_left",eye_left)
+                    left_eye_img = im0[eye_left[1]:eye_left[3],eye_left[0]:eye_left[2],:]
+                    left_eye_img = cv2.resize(left_eye_img,(eye_w_roi,eye_h_roi))
+                if len(eye_right) > 0:
+                    # print("eye_right",eye_right)
+                    right_eye_img = im0[eye_right[1]:eye_right[3],eye_right[0]:eye_right[2],:]
+                    right_eye_img = cv2.resize(right_eye_img,(eye_w_roi,eye_h_roi))
+
+                # update eye image
+                im0[0:eye_h_roi,0:eye_w_roi,:] = left_eye_img
+                im0[0:eye_h_roi,eye_w_roi:2*eye_w_roi,:]  = right_eye_img
 
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
@@ -192,7 +331,7 @@ def detect(save_img=False):
 
                     if save_img or view_img:  # Add bbox to image
                         label = f'{names[int(cls)]} {conf:.2f}'
-                        print(label)
+                        # print(label)
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
 
             # Print time (inference + NMS)
@@ -270,12 +409,6 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='exp', help='save results to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
-    # Self add
-    parser.add_argument('--arch',dest='arch',help='Network architecture, can be: ResNet18, ResNet34, ResNet50, ResNet101, ResNet152',
-        default='ResNet50', type=str)
-    parser.add_argument(
-        '--snapshot',dest='snapshot', help='Path of model snapshot.', 
-        default='output/snapshots/L2CS-gaze360-_loader-180-4/_epoch_55.pkl', type=str)
     opt = parser.parse_args()
     print(opt)
 

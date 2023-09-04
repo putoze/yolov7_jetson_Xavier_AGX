@@ -32,7 +32,28 @@ if [ $ENV_Set -eq 1 ] ; then
     echo ============
 fi
 
-# [./darknet] --> [./home/lab716/Desktop/Rain/darknet/darknet]
+#============================================================================ 
+
+echo ""
+echo "Hello, choose the weight you want it~"
+echo [0]: yolov7-tiny-20230831-five-direct.pt
+echo ----------------
+echo [1]: yolov7-tiny-11class-894epoch.pt
+echo ----------------
+echo -n "Press enter to start it:"
+
+read MY_Weights
+
+if [ $MY_Weights -eq 0 ] ; then
+    Weights='yolov7-tiny-20230831-five-direct.pt'
+fi 
+if [ $MY_Weights -eq 1 ] ; then
+    Weights='yolov7-tiny-11class-894epoch.pt'
+fi 
+
+echo $Weights
+
+
 #============================================================================ 
 
 echo ""
@@ -42,9 +63,11 @@ echo [0]: otocam  detect
 echo ----------------
 echo [1]: Video  detect
 echo ----------------
-echo [2]: otocam trt_yolo
+echo [2]: otocam  detect + L2CS
 echo ----------------
-echo [3]: otocam  detect + L2CS
+echo [3]: Video  detect + L2CS
+echo ----------------
+echo [4]: Image  detect + L2CS
 echo ----------------
 echo -n "Press enter to start it:"
 
@@ -54,11 +77,11 @@ read MY_mode
 
 if [ $MY_mode -eq 0 ] ; then
     echo ============
-    echo 「otocam detect torch_yolov7_weight/yolov7-tiny-20230831-five-direct.pt」
+    echo 「otocam  detect」
     echo ============
 
     python detect.py \
-    --weight ../torch_yolov7_weight/yolov7-tiny-20230831-five-direct/yolov7-tiny-20230831-five-direct.pt \
+    --weight ../torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
     --source cam.txt 
@@ -69,50 +92,69 @@ fi
 #============================================================================ 
 if [ $MY_mode -eq 1 ] ; then
     echo ============
-    echo 「Video torch_yolov7_weight/yolov7-custom_v3/best.pt」
+    echo 「Video  detect」
     echo ============
 
     python detect.py \
-    --weight ../torch_yolov7_weight/yolov7-custom_v3/best.pt \
+    --weight ../torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source /home/joe/Desktop/Camera_oToCAM250/2023_0816_otocam_datavideo/output29.avi
-    #--view-img \
+    --source /home/joe/Desktop/Camera_oToCAM250/2023_0816_otocam_datavideo/output29.avi \
+    --view-img
     #--no-trace
 fi
 
 #============================================================================ 
 if [ $MY_mode -eq 2 ] ; then
     echo ============
-    echo 「otocam trt_yolo torch_yolov7_weight/yolov7-tiny-20230831-five-direct.pt」
+    echo 「otocam detect L2CS」
     echo ============
 
-    python trt_yolo.py \
-    --weight ../torch_yolov7_weight/yolov7-tiny-20230831-five-direct/yolov7-tiny-20230831-five-direct.pt \
+    python detect_with_L2CS.py \
+    --weight ../torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --gstr 1 --save_img ./save_img/save_img \
-    --save_record ./save_img/save_record 
-    # --weight ./torch_yolov7_weight/yolov7-custom_v3/best.pt \
+    --source cam.txt
 fi
 
 #============================================================================ 
 
-
-
- if [ $MY_mode -eq 3 ] ; then
+if [ $MY_mode -eq 3 ] ; then
     echo ============
-    echo 「otocam detect L2CS torch_yolov7_weight/yolov7-tiny-20230831-five-direct.pt」
+    echo 「Video detect L2CS」
     echo ============
 
     python detect_with_L2CS.py \
-    --weight ../torch_yolov7_weight/yolov7-tiny-20230831-five-direct/yolov7-tiny-20230831-five-direct.pt \
+    --weight ../torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source cam.txt \
-    --snapshot models/Gaze360/L2CSNet_gaze360.pkl
-    # --weight ./torch_yolov7_weight/yolov7-custom_v3/best.pt \
+    --source /home/joe/Desktop/Camera_oToCAM250/2023_0816_otocam_datavideo/output29.avi \
+    --view-img
     
+fi
+
+#============================================================================ 
+
+if [ $MY_mode -eq 4 ] ; then
+    echo ============
+    echo 「Image detect L2CS」
+    echo ============
+
+    # for filelist in ./test_image/frank/*.png;do
+
+    # python detect_with_L2CS.py \
+    # --weight ../torch_yolov7_weight/$Weights \
+    # --conf 0.5 \
+    # --img-size 640 \
+    # --source $filelist \
+    # --view-img
+    # done
+    python detect_with_L2CS.py \
+    --weight ../torch_yolov7_weight/$Weights \
+    --conf 0.5 \
+    --img-size 640 \
+    --source ./test_image/frank \
+    --view-img
 fi
 
 #============================================================================ 
