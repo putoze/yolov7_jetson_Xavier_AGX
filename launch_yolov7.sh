@@ -5,7 +5,7 @@ echo [0]: JetsonYoloV7-TensorRT
 echo ----------------
 echo [1]: yolov3_tenrt
 echo ----------------
-echo [2]: None
+echo [n]: None
 echo ----------------
 echo -n "Press enter to start it:"
 
@@ -42,6 +42,11 @@ echo [1]: yolov7-tiny-11class-894epoch.pt
 echo ----------------
 echo [2]: yolov7-w6-pose.pt
 echo ----------------
+echo [3]: yolov8-lite-t.onnx
+echo ----------------
+echo [4]: yolov8-lite-s.onnx
+echo ----------------
+echo [n]: None
 echo -n "Press enter to start it:"
 
 read MY_Weights
@@ -55,6 +60,13 @@ fi
 if [ $MY_Weights -eq 2 ] ; then
     Weights='yolov7-w6-pose.pt'
 fi 
+if [ $MY_Weights -eq 3 ] ; then
+    Weights='yolov8-lite-t.onnx'
+fi 
+if [ $MY_Weights -eq 4 ] ; then
+    Weights='yolov8-lite-s.onnx'
+fi 
+
 
 echo $Weights
 
@@ -77,6 +89,8 @@ echo ----------------
 echo [5]: Video  detect + pose
 echo ----------------
 echo [6]: otocam  detect + landmark
+echo ----------------
+echo [7]: otocam  yolov8-face-demo
 echo ----------------
 echo -n "Press enter to start it:"
 
@@ -195,6 +209,21 @@ if [ $MY_mode -eq 6 ] ; then
     --img-size 640 \
     --source cam.txt \
     --no-trace 
+fi
+
+#============================================================================ 
+
+
+if [ $MY_mode -eq 7 ] ; then
+    echo ============
+    echo 「otocam  yolov8-face-demo」
+    echo ============
+
+    python3 yolov8-face-demo.py \
+    --modelpath ../yolov8-face-weights/$Weights \
+    --gstr 1 --save_img ./save_img/save_img \
+    --save_record ./save_img/save_record 
+    
 fi
 
 #============================================================================ 

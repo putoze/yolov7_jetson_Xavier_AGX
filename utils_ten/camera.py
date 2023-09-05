@@ -165,10 +165,6 @@ def grab_img(cam):
         if cam.img_handle is None:
             #logging.warning('Camera: cap.read() returns None...')
             break
-        s = letterbox(cam.img_handle, cam.img_handle.img_size, stride=cam.stride)  # shapes
-        rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
-        if not rect:
-            print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
     cam.thread_running = False
 
 
