@@ -36,7 +36,7 @@ fi
 
 echo ""
 echo "Hello, choose the weight you want it~"
-echo [0]: yolov7-tiny-20230831-five-direct.pt
+echo [0]: yolov7-tiny-20230831-five-direct-1100epoch.pt
 echo ----------------
 echo [1]: yolov7-tiny-11class-894epoch.pt
 echo ----------------
@@ -46,13 +46,15 @@ echo [3]: yolov8-lite-t.onnx
 echo ----------------
 echo [4]: yolov8-lite-s.onnx
 echo ----------------
+echo [5]: yolov7-tiny-20230831-five-direct-2200epoch.pt
+echo ----------------
 echo [n]: None
 echo -n "Press enter to start it:"
 
 read MY_Weights
 
 if [ $MY_Weights -eq 0 ] ; then
-    Weights='yolov7-tiny-20230831-five-direct.pt'
+    Weights='yolov7-tiny-20230831-five-direct-1100epoch.pt'
 fi 
 if [ $MY_Weights -eq 1 ] ; then
     Weights='yolov7-tiny-11class-894epoch.pt'
@@ -66,7 +68,9 @@ fi
 if [ $MY_Weights -eq 4 ] ; then
     Weights='yolov8-lite-s.onnx'
 fi 
-
+if [ $MY_Weights -eq 5 ] ; then
+    Weights='yolov7-tiny-20230831-five-direct-2200epoch.pt'
+fi 
 
 echo $Weights
 
@@ -104,10 +108,10 @@ if [ $MY_mode -eq 0 ] ; then
     echo ============
 
     python detect.py \
-    --weight ../torch_yolov7_weight/$Weights \
+    --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source cam.txt 
+    --source cam.txt
     # --weight ./torch_yolov7_weight/yolov7-custom_v3/best.pt \
     
 fi
@@ -119,12 +123,12 @@ if [ $MY_mode -eq 1 ] ; then
     echo ============
 
     python detect.py \
-    --weight ../torch_yolov7_weight/$Weights \
+    --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
     --source /home/joe/Desktop/Camera_oToCAM250/2023_0816_otocam_datavideo/output29.avi \
-    --view-img 
-    #--no-trace
+    --view-img
+
 fi
 
 #============================================================================ 
@@ -134,10 +138,11 @@ if [ $MY_mode -eq 2 ] ; then
     echo ============
 
     python detect_with_L2CS.py \
-    --weight ../torch_yolov7_weight/$Weights \
+    --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
     --source cam.txt
+
 fi
 
 #============================================================================ 
@@ -148,12 +153,12 @@ if [ $MY_mode -eq 3 ] ; then
     echo ============
 
     python detect_with_L2CS.py \
-    --weight ../torch_yolov7_weight/$Weights \
+    --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
     --source /home/joe/Desktop/Camera_oToCAM250/2023_0816_otocam_datavideo/output29.avi \
     --view-img
-    
+
 fi
 
 #============================================================================ 
@@ -173,7 +178,7 @@ if [ $MY_mode -eq 4 ] ; then
     # --view-img
     # done
     python detect_with_L2CS.py \
-    --weight ../torch_yolov7_weight/$Weights \
+    --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
     --source ./test_image/frank \
@@ -188,10 +193,10 @@ if [ $MY_mode -eq 5 ] ; then
     echo ============
 
     python detect_pose.py \
-    --weights ../torch_yolov7_weight/$Weights \
+    --weights ../weights/torch_yolov7_weight/$Weights \
     --conf 0.05 --iou-thres 0.65 \
     --img-size 1280 \
-    --source /home/joe/Desktop/Camera_oToCAM250/2023_0816_otocam_datavideo/output29.avi \
+    --source cam.txt \
     --no-trace 
 
 fi
@@ -204,7 +209,7 @@ if [ $MY_mode -eq 6 ] ; then
     echo ============
 
     python detect_landmark.py \
-    --weight ../torch_yolov7_weight/$Weights \
+    --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
     --source cam.txt \
@@ -220,7 +225,7 @@ if [ $MY_mode -eq 7 ] ; then
     echo ============
 
     python3 yolov8-face-demo.py \
-    --modelpath ../yolov8-face-weights/$Weights \
+    --modelpath ../weights/yolov8-face-weights/$Weights \
     --gstr 1 --save_img ./save_img/save_img \
     --save_record ./save_img/save_record 
     

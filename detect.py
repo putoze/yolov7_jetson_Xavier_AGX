@@ -83,12 +83,14 @@ def detect(save_img=False):
             img = img.unsqueeze(0)
 
         # Warmup
+        '''
         if device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
             old_img_b = img.shape[0]
             old_img_h = img.shape[2]
             old_img_w = img.shape[3]
             for i in range(3):
                 model(img, augment=opt.augment)[0]
+        '''
 
         # Inference
         t1 = time_synchronized()
