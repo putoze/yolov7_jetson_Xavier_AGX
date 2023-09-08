@@ -96,6 +96,8 @@ echo [6]: otocam  detect + landmark
 echo ----------------
 echo [7]: otocam  yolov8-face-demo
 echo ----------------
+echo [8]: otocam  detect + 6D headpose
+echo ----------------
 echo -n "Press enter to start it:"
 
 read MY_mode
@@ -228,6 +230,24 @@ if [ $MY_mode -eq 7 ] ; then
     --modelpath ../weights/yolov8-face-weights/$Weights \
     --gstr 1 --save_img ./save_img/save_img \
     --save_record ./save_img/save_record 
+    
+fi
+
+
+#============================================================================ 
+
+
+if [ $MY_mode -eq 8 ] ; then
+    echo ============
+    echo 「otocam  yolov8-face-demo」
+    echo ============
+
+    python detect_with_6D.py \
+    --weight ../weights/torch_yolov7_weight/$Weights \
+    --conf 0.5 \
+    --img-size 640 \
+    --source cam.txt \
+    --no-trace 
     
 fi
 
