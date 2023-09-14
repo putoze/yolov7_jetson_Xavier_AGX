@@ -38,7 +38,7 @@ echo ""
 echo "Hello, choose the weight you want it~"
 echo [0]: yolov7-tiny-20230831-five-direct-1100epoch.pt
 echo ----------------
-echo [1]: yolov7-tiny-11class-894epoch.pt
+echo [1]: yolov7-tiny-20230812-11class-894epoch.pt
 echo ----------------
 echo [2]: yolov7-w6-pose.pt
 echo ----------------
@@ -57,7 +57,7 @@ if [ $MY_Weights -eq 0 ] ; then
     Weights='yolov7-tiny-20230831-five-direct-1100epoch.pt'
 fi 
 if [ $MY_Weights -eq 1 ] ; then
-    Weights='yolov7-tiny-11class-894epoch.pt'
+    Weights='yolov7-tiny-20230812-11class-894epoch.pt'
 fi 
 if [ $MY_Weights -eq 2 ] ; then
     Weights='yolov7-w6-pose.pt'
