@@ -79,8 +79,8 @@ echo $Weights
 
 echo ""
 echo "Hello, choose the mode you want it~"
-echo ------ Tensorrt Demo ------
-echo [0]: otocam  detect
+echo ------ Demo ------
+echo [0]: img + save_txt  detect
 echo ----------------
 echo [1]: Video  detect
 echo ----------------
@@ -98,6 +98,12 @@ echo [7]: otocam  yolov8-face-demo
 echo ----------------
 echo [8]: otocam  detect + 6D headpose
 echo ----------------
+echo [9]: video  detect + 6D headpose
+echo ----------------
+echo [10]: otocam  detect + 6D headpose + gazeml
+echo ----------------
+echo [11]: video  detect + 6D headpose + gazeml
+echo ----------------
 echo -n "Press enter to start it:"
 
 read MY_mode
@@ -106,14 +112,15 @@ read MY_mode
 
 if [ $MY_mode -eq 0 ] ; then
     echo ============
-    echo 「otocam  detect」
+    echo 「img + save_txt  detect」
     echo ============
 
     python detect.py \
     --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source cam.txt
+    --source /media/joe/Xavierssd/2023_0912_training_data_set/rain_phone_seatbelt/ \
+    --save-txt
     # --weight ./torch_yolov7_weight/yolov7-custom_v3/best.pt \
     
 fi
@@ -128,7 +135,7 @@ if [ $MY_mode -eq 1 ] ; then
     --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source /home/joe/Desktop/Camera_oToCAM250/2023_0816_otocam_datavideo/output29.avi \
+    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output29.avi \
     --view-img
 
 fi
@@ -158,8 +165,7 @@ if [ $MY_mode -eq 3 ] ; then
     --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source /home/joe/Desktop/Camera_oToCAM250/2023_0816_otocam_datavideo/output29.avi \
-    --view-img
+    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output29.avi
 
 fi
 
@@ -191,7 +197,7 @@ fi
 
 if [ $MY_mode -eq 5 ] ; then
     echo ============
-    echo 「Video detect pose」
+    echo 「otocam detect pose」
     echo ============
 
     python detect_pose.py \
@@ -239,7 +245,7 @@ fi
 
 if [ $MY_mode -eq 8 ] ; then
     echo ============
-    echo 「otocam  yolov8-face-demo」
+    echo 「otocam  detect_with_6D」
     echo ============
 
     python detect_with_6D.py \
@@ -250,6 +256,58 @@ if [ $MY_mode -eq 8 ] ; then
     --no-trace 
     
 fi
+
+#============================================================================ 
+
+
+if [ $MY_mode -eq 9 ] ; then
+    echo ============
+    echo 「video  detect_with_6D」
+    echo ============
+
+    python detect_with_6D.py \
+    --weight ../weights/torch_yolov7_weight/$Weights \
+    --conf 0.5 \
+    --img-size 640 \
+    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output29.avi \
+    --no-trace \
+    --view-img \
+    --nosave
+    
+fi
+
+#============================================================================ 
+
+if [ $MY_mode -eq 10 ] ; then
+    echo ============
+    echo 「otocam  detect_with_6D_gazeml」
+    echo ============
+
+    python detect_with_6D_gazeml.py \
+    --weight ../weights/torch_yolov7_weight/$Weights \
+    --conf 0.5 \
+    --img-size 640 \
+    --source cam.txt \
+    --no-trace 
+    
+fi
+
+#============================================================================ 
+
+if [ $MY_mode -eq 11 ] ; then
+    echo ============
+    echo 「Video detect_with_6D_gazeml」
+    echo ============
+
+    python detect_with_6D_gazeml.py \
+    --weight ../weights/torch_yolov7_weight/$Weights \
+    --conf 0.5 \
+    --img-size 640 \
+    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output29.avi \
+    --no-trace
+
+fi
+
 
 #============================================================================ 
 

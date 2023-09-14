@@ -115,7 +115,37 @@ def find_max_Thresh(input_img,flag_list):
         return None
 
     
-        
+def draw_Ellipse_fit(img,pupil,elPupilThresh):
+    #(Gray,Binary,Morphological,Gaussian blur,Sobel,Canny,Find contours)
+
+    # update elPupilThresh into golbal image
+    center = (int(elPupilThresh[0][0] + pupil[0]), int(elPupilThresh[0][1] + pupil[1]))
+    new_elPupilThresh_left = (center,elPupilThresh[1],elPupilThresh[2])
+    # cv2.ellipse(img, new_elPupilThresh_left, (0, 255, 0), 2)
+    cv2.circle(img, center, 3, (0, 0, 255), -1)
+    # resize image into top left corner
+    return center
+
+def find_ellipse_point(num_points,elthresh):
+    center,axes,angle = elthresh
+    angle_step = 360 / num_points
+    ellipse_points = []
+    for i in range(num_points):
+        angle_deg = angle + angle_step * i
+        angle_rad = np.radians(angle_deg)
+        x_point = center[0] + (axes[0] / 2) * np.cos(angle_rad)
+        y_point = center[1] + (axes[1] / 2) * np.sin(angle_rad)
+        ellipse_points.append([x_point, y_point])
+
+    return np.array(ellipse_points)
+
+def draw_ellipse_point(img,ellipse_points,pupil_roi):
+    img_out = img
+    for pt in ellipse_points:
+        point = (int(pupil_roi[0] + pt[0]),int(pupil_roi[1] + pt[1]))
+        cv2.circle(img_out, point, 2, (0, 255, 0), -1)
+
+    return img_out
         
         
 

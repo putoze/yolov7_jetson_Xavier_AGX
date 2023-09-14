@@ -7,6 +7,17 @@ import torch
 import torch.backends.cudnn as cudnn
 from numpy import random
 import numpy as np
+import re
+import math
+import os
+
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
+from numpy.lib.function_base import _quantile_unchecked
+from matplotlib import pyplot as plt
+from model_6DRepNet import SixDRepNet
+import utils_with_6D
+import matplotlib
+matplotlib.use('TkAgg')
 
 import torch.nn as nn
 from utils_ten.display import open_window, show_fps, set_display
@@ -19,7 +30,9 @@ from utils_L2CS import draw_gaze
 from PIL import Image, ImageOps
 
 from model_L2CS import L2CS
-from process_alg.fitEllipse import find_max_Thresh
+from process_alg.fitEllipse import *
+import process_alg.gaze_modelbased as GM 
+import process_alg.gaze as gaze_util
 
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
@@ -47,23 +60,7 @@ def getArch(arch,bins):
                 'The default value of ResNet50 will be used instead!')
         model = L2CS( torchvision.models.resnet.Bottleneck, [3, 4, 6,  3], bins)
     return model
-
-
-def pupil_fit(img,pupil,flag_list):
-    #(Gray,Binary,Morphological,Gaussian blur,Sobel,Canny,Find contours)
-    margin = 0
-    input_eye_img = img[pupil[1]-margin:pupil[3]+margin,pupil[0]-margin:pupil[2]+margin,:]
-    elPupilThresh = find_max_Thresh(input_eye_img,flag_list)
-    if elPupilThresh != None:
-        # update elPupilThresh into golbal image
-        center = (int(elPupilThresh[0][0] + pupil[0]), int(elPupilThresh[0][1] + pupil[1]))
-        new_elPupilThresh_left = (center,elPupilThresh[1],elPupilThresh[2])
-        cv2.ellipse(img, new_elPupilThresh_left, (0, 255, 0), 2)
-        cv2.circle(img, center, 3, (0, 0, 255), -1)
-        # resize image into top left corner
-        return center
-    else:
-        return 0
+    
 
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
@@ -124,10 +121,10 @@ def detect(save_img=False):
     arch='ResNet50'
     batch_size = 1
     gpu = select_device(opt.device, batch_size=batch_size)
-    snapshot_path = '../weights/L2CS-Net-models/Gaze360/L2CSNet_gaze360.pkl'
+    snapshot_path_L2CS = '../weights/L2CS-Net-models/Gaze360/L2CSNet_gaze360.pkl'
     # snapshot_path = '../L2CS-Net-models/MPIIGaze/fold0.pkl'
 
-    transformations = transforms.Compose([
+    transformations_L2CS = transforms.Compose([
         transforms.Resize(448),
         transforms.ToTensor(),
         transforms.Normalize(
@@ -138,7 +135,7 @@ def detect(save_img=False):
     
     modelL2CS=getArch(arch, 90)
     print('Loading snapshot.')
-    saved_state_dict = torch.load(snapshot_path)
+    saved_state_dict = torch.load(snapshot_path_L2CS)
     modelL2CS.load_state_dict(saved_state_dict)
     modelL2CS.cuda(gpu)
     modelL2CS.eval()
@@ -150,21 +147,49 @@ def detect(save_img=False):
     x=0
     # End L2CS-Net
 
+    transformations_6D = transforms.Compose([transforms.Resize(224),
+                                      transforms.CenterCrop(224),
+                                      transforms.ToTensor(),
+                                      transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+
+
+    # 6D_Repnet
+    snapshot_path_6D = '../weights/6DRepNet/6DRepNet_300W_LP_AFLW2000.pth'
+    model_6DRepNet = SixDRepNet(backbone_name='RepVGG-B1g2',
+                       backbone_file='',
+                       deploy=True,
+                       pretrained=False)
+
+    saved_state_dict = torch.load(os.path.join(
+        snapshot_path_6D), map_location='cpu')
+
+    if 'model_state_dict' in saved_state_dict:
+        model_6DRepNet.load_state_dict(saved_state_dict['model_state_dict'])
+    else:
+        model_6DRepNet.load_state_dict(saved_state_dict)
+    model_6DRepNet.to(device)
+
+    # End 6D_Repnet
+
+    # Test the Model
+    model_6DRepNet.eval()  # Change model to 'eval' mode (BN uses moving mean/var).
+
     # Self-define global parameter
     # ---------------------------
     # ------ face imformation ------
     nose_center_point = (0,0)
     mouse_center_point = (0,0)
-    left_center = (0,0)
-    right_center = (0,0)
+    left_iris_center = (0,0)
+    left_eye_center = (0,0)
+    right_eye_center = (0,0)
+    right_iris_center = (0,0)
     eye_w_roi = 100
     eye_h_roi = 50
-    face_roi = 200
     driver_face_roi = [0,100,0,100]
-    #------ put txt ------
-    base_txt_height = 35
-    gap_txt_height = 35
-    len_width = 400
+    #------ Thresh ------
+    El_left_eye_thresh = (0,0,0)
+    El_right_eye_thresh = (0,0,0)
+    num_iris_landmark = 8
     #------ eye img ------
     right_eye_img = cv2.imread("./test_image/eye/3.png")  
     right_eye_img = cv2.resize(right_eye_img,(eye_w_roi,eye_h_roi))
@@ -172,6 +197,7 @@ def detect(save_img=False):
     left_eye_img = cv2.resize(left_eye_img,(eye_w_roi,eye_h_roi))
 
     t0 = time.time()
+
     for path, img, im0s, vid_cap in dataset:
 
         img = torch.from_numpy(img).to(device)
@@ -201,6 +227,7 @@ def detect(save_img=False):
         # Apply Classifier
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
+    
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image
@@ -215,6 +242,7 @@ def detect(save_img=False):
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
 
+            start = time.time()
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -232,6 +260,7 @@ def detect(save_img=False):
                 pupil_left = []
                 pupil_right = []
 
+                driver_face_local = []
                 # find driver face
                 for *xyxy, conf, cls in reversed(det):
                     if names[int(cls)] == 'face':
@@ -239,7 +268,10 @@ def detect(save_img=False):
                         face_area = (bb[2] - bb[0])*(bb[3]-bb[1])
                         if(face_area > face_max) :
                             face_max = face_area
-                            driver_face_roi = bb
+                            driver_face_local = bb
+
+                if len(driver_face_local) != 0:
+                    driver_face_roi = driver_face_local
 
                 # find all boundary of face     
                 for *xyxy, conf, cls in reversed(det):
@@ -264,51 +296,114 @@ def detect(save_img=False):
                             mouse_center_point = center
 
                 # L2CS-Net
-                x_min,y_min,x_max,y_max = driver_face_roi
-                bbox_width = x_max - x_min
-                bbox_height = y_max - y_min
-                # x_min = max(0,x_min-int(0.2*bbox_height))
-                # y_min = max(0,y_min-int(0.2*bbox_width))
-                # x_max = x_max+int(0.2*bbox_height)
-                # y_max = y_max+int(0.2*bbox_width)
+                # x_min,y_min,x_max,y_max = driver_face_roi
                 # bbox_width = x_max - x_min
-                # bbox_height = y_max - y_mi    
-                # Crop image
+                # bbox_height = y_max - y_min
 
-                img_L2CS = im0[y_min:y_max, x_min:x_max]
-                img_L2CS = cv2.resize(img_L2CS, (224, 224))
-                img_L2CS = cv2.cvtColor(img_L2CS, cv2.COLOR_BGR2RGB)
-                im_pil = Image.fromarray(img_L2CS)
-                img_L2CS =transformations(im_pil)
-                img_L2CS  = Variable(img_L2CS).cuda(gpu)
-                img_L2CS  = img_L2CS.unsqueeze(0) 
+                # img_L2CS = im0[y_min:y_max, x_min:x_max]
+                # img_L2CS = cv2.resize(img_L2CS, (224, 224))
+                # img_L2CS = cv2.cvtColor(img_L2CS, cv2.COLOR_BGR2RGB)
+                # im_pil = Image.fromarray(img_L2CS)
+                # img_L2CS =transformations_L2CS(im_pil)
+                # img_L2CS  = Variable(img_L2CS).cuda(gpu)
+                # img_L2CS  = img_L2CS.unsqueeze(0) 
 
-                # gaze prediction
-                gaze_pitch, gaze_yaw = modelL2CS(img_L2CS)
+                # # gaze prediction
+                # gaze_pitch, gaze_yaw = modelL2CS(img_L2CS)
 
-                pitch_predicted = softmax(gaze_pitch)
-                yaw_predicted = softmax(gaze_yaw)
+                # pitch_predicted = softmax(gaze_pitch)
+                # yaw_predicted = softmax(gaze_yaw)
 
-                # Get continuous predictions in degrees.
-                pitch_predicted = torch.sum(pitch_predicted.data[0] * idx_tensor) * 4 - 180
-                yaw_predicted = torch.sum(yaw_predicted.data[0] * idx_tensor) * 4 - 180
+                # # Get continuous predictions in degrees.
+                # pitch_predicted = torch.sum(pitch_predicted.data[0] * idx_tensor) * 4 - 180
+                # yaw_predicted = torch.sum(yaw_predicted.data[0] * idx_tensor) * 4 - 180
 
-                pitch_predicted= pitch_predicted.cpu().detach().numpy()* np.pi/180.0
-                yaw_predicted= yaw_predicted.cpu().detach().numpy()* np.pi/180. 
+                # pitch_predicted= pitch_predicted.cpu().detach().numpy()* np.pi/180.0
+                # yaw_predicted= yaw_predicted.cpu().detach().numpy()* np.pi/180. 
                 
                     
-                draw_gaze(x_min,y_min,bbox_width, bbox_height,im0,(pitch_predicted,yaw_predicted),color=(0,0,255))
-                cv2.rectangle(im0, (x_min, y_min), (x_max, y_max), (0,255,0), 1)
+                # draw_gaze(x_min,y_min,bbox_width, bbox_height,im0,(pitch_predicted,yaw_predicted),color=(0,0,255))
+                # cv2.rectangle(im0, (x_min, y_min), (x_max, y_max), (0,255,0), 1)
 
                 # End L2CS-Net
 
+                # 6DRepNet
+                x_min,y_min,x_max,y_max = driver_face_roi
+                bbox_width = abs(x_max - x_min)
+                bbox_height = abs(y_max - y_min)
+
+                x_min = max(0, x_min-int(0.2*bbox_height))
+                y_min = max(0, y_min-int(0.2*bbox_width))
+                x_max = x_max+int(0.2*bbox_height)
+                y_max = y_max+int(0.2*bbox_width)
+
+                img = im0[y_min:y_max, x_min:x_max]
+                img = Image.fromarray(img)
+                img = img.convert('RGB')
+                img = transformations_6D(img)
+
+                img = torch.Tensor(img[None, :]).to(device)
+
+                R_pred = model_6DRepNet(img)
+
+                euler = utils_with_6D.compute_euler_angles_from_rotation_matrices(
+                    R_pred)*180/np.pi
+                p_pred_deg = euler[:, 0].cpu()
+                y_pred_deg = euler[:, 1].cpu()
+                r_pred_deg = euler[:, 2].cpu()
+
+                # utils_with_6D.plot_pose_cube(im0,  y_pred_deg, p_pred_deg, r_pred_deg, x_min + int(.5*(
+                #     x_max-x_min)), y_min + int(.5*(y_max-y_min)), size=bbox_width)
+                height, width = im0.shape[:2]
+                tdx = width - 70
+                tdy = 70
+                utils_with_6D.draw_axis(im0,y_pred_deg,p_pred_deg,r_pred_deg,tdx,tdy, size = 50)
+                # utils_with_6D.draw_gaze_6D(nose_center_point,driver_face_roi,im0,(p_pred_deg,y_pred_deg),color=(0,0,255))
+    
+                # End 6DRepNet
+
                 # pupil left
                 flag_list = [1,1,1,1,1,1,1]
+
+                # define eye region
+                if len(eye_left) > 0:
+                    # print("eye_left",eye_left)
+                    left_eye_img = im0[eye_left[1]:eye_left[3],eye_left[0]:eye_left[2],:]
+                if len(eye_right) > 0:
+                    # print("eye_right",eye_right)
+                    right_eye_img = im0[eye_right[1]:eye_right[3],eye_right[0]:eye_right[2],:]
+
+                # ellipse fit eye
+                if len(eye_left) > 0:
+                    El_left_eye_thresh = find_max_Thresh(left_eye_img,flag_list)
+                if len(eye_right) > 0:
+                    El_right_eye_thresh = find_max_Thresh(right_eye_img,flag_list)
+
+                # ellipse fit pupil and gaze estimate
                 if len(pupil_left) > 0:
-                    left_center = pupil_fit(im0,pupil_left,flag_list)
-                # pupil right
+                    pupil_left_img = im0[pupil_left[1]:pupil_left[3],pupil_left[0]:pupil_left[2],:]
+                    El_left_iris_thresh = find_max_Thresh(pupil_left_img,flag_list)
+                    if El_left_iris_thresh != None:
+                        left_iris_center = draw_Ellipse_fit(im0,pupil_left,El_left_iris_thresh)
+                        left_iris_ldmks = find_ellipse_point(num_iris_landmark,El_left_iris_thresh)
+                        im0 = draw_ellipse_point(im0,left_iris_ldmks,pupil_left)
+                        left_gaze = GM.estimate_gaze_from_landmarks(left_iris_ldmks, left_iris_center, left_eye_center, El_left_eye_thresh[1][0])
+                        left_gaze = left_gaze.reshape(1, 2)
+                        left_gaze[0][1] = -left_gaze[0][1]
+                        im0 = gaze_util.draw_gaze(im0,left_iris_center,left_gaze[0])
                 if len(pupil_right) > 0:
-                    right_center = pupil_fit(im0,pupil_right,flag_list)
+                    pupil_right_img = im0[pupil_right[1]:pupil_right[3],pupil_right[0]:pupil_right[2],:]
+                    El_right_iris_thresh = find_max_Thresh(pupil_right_img,flag_list)
+                    if El_right_iris_thresh != None:
+                        right_iris_center = draw_Ellipse_fit(im0,pupil_right,El_right_iris_thresh)
+                        right_iris_ldmks = find_ellipse_point(num_iris_landmark,El_right_iris_thresh)
+                        im0 = draw_ellipse_point(im0,right_iris_ldmks,pupil_right)
+                        right_gaze = GM.estimate_gaze_from_landmarks(right_iris_ldmks, right_iris_center, right_eye_center, El_right_eye_thresh[1][0])
+                        right_gaze = right_gaze.reshape(1, 2)
+                        right_gaze[0][1] = -right_gaze[0][1]
+                        im0 = gaze_util.draw_gaze(im0,right_iris_center,right_gaze[0])
+
+                # update eye image
                 if len(eye_left) > 0:
                     # print("eye_left",eye_left)
                     left_eye_img = im0[eye_left[1]:eye_left[3],eye_left[0]:eye_left[2],:]
@@ -318,10 +413,11 @@ def detect(save_img=False):
                     right_eye_img = im0[eye_right[1]:eye_right[3],eye_right[0]:eye_right[2],:]
                     right_eye_img = cv2.resize(right_eye_img,(eye_w_roi,eye_h_roi))
 
-                # update eye image
+                # put eye image on left top
                 im0[0:eye_h_roi,0:eye_w_roi,:] = left_eye_img
                 im0[0:eye_h_roi,eye_w_roi:2*eye_w_roi,:]  = right_eye_img
-
+                # im0[eye_h_roi:2*eye_h_roi,0:eye_w_roi,:] = rotation_left_eye_img
+                
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
@@ -336,13 +432,18 @@ def detect(save_img=False):
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
 
             # Print time (inference + NMS)
+            end = time.time()
             print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
 
             # Stream results
+            
+
             if view_img:
                 # if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_AUTOSIZE) < 0:
                 #     break
-                fps = 1.0 / (t2 - t1)
+                fps = 1.0 / (end - start)
+                # display_img = img_queue.get()
+                # display_fps = fps_queue.get()
                 # fps = curr_fps if fps == 0.0 else (fps*0.95 + curr_fps*0.05)
                 im0 = show_fps(im0, fps)
                 cv2.imshow(WINDOW_NAME, im0)
@@ -356,10 +457,10 @@ def detect(save_img=False):
                     print("")
                     cv2.destroyAllWindows()
                     return 0
-                elif key == ord('F') or key == ord('f'):  # Toggle fullscreen
-                    full_scrn = not full_scrn
-                    # print(full_scrn)
-                    set_display(WINDOW_NAME, full_scrn)
+                # elif key == ord('F') or key == ord('f'):  # Toggle fullscreen
+                #     full_scrn = not full_scrn
+                #     # print(full_scrn)
+                #     set_display(WINDOW_NAME, full_scrn)
                     
 
             # Save results (image with detections)

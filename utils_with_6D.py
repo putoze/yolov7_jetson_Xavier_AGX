@@ -211,3 +211,24 @@ def get_R(x,y,z):
 
     R = Rz.dot(Ry.dot(Rx))
     return R
+
+
+def draw_gaze_6D(nose_pos,driver_face_roi,image_in, pitchyaw, thickness=2, color=(255, 255, 0),sclae=2.0):
+    """Draw gaze angle on given image with a given eye positions."""
+    image_out = image_in
+    xmin,ymin,xmax,ymax = driver_face_roi
+
+    pitch = pitchyaw[0] * np.pi / 180
+    yaw = -(pitchyaw[1] * np.pi / 180)
+
+    (h, w) = image_in[xmin:xmax,ymin:ymax].shape[:2]
+    length = w/2
+    if len(image_out.shape) == 2 or image_out.shape[2] == 1:
+        image_out = cv2.cvtColor(image_out, cv2.COLOR_GRAY2BGR)
+    dx = -length * np.sin(pitch) * np.cos(yaw)
+    dy = -length * np.sin(yaw)
+    cv2.arrowedLine(image_out, tuple(np.round(nose_pos).astype(np.int32)),
+                   tuple(np.round([nose_pos[0] + dx, nose_pos[1] + dy]).astype(int)), color,
+                   thickness, cv2.LINE_AA, tipLength=0.18)
+    return image_out    
+

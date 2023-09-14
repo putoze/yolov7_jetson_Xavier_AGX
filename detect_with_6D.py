@@ -10,6 +10,7 @@ import numpy as np
 import re
 import math
 import os
+import queue
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 from numpy.lib.function_base import _quantile_unchecked
@@ -41,10 +42,6 @@ from utils.torch_utils import select_device, load_classifier, time_synchronized,
 
 # Self add
 WINDOW_NAME = 'Yolov7-Tiny Demo'
-transformations = transforms.Compose([transforms.Resize(224),
-                                      transforms.CenterCrop(224),
-                                      transforms.ToTensor(),
-                                      transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
 def getArch(arch,bins):
     # Base network structure
@@ -142,7 +139,7 @@ def detect(save_img=False):
     snapshot_path_L2CS = '../weights/L2CS-Net-models/Gaze360/L2CSNet_gaze360.pkl'
     # snapshot_path = '../L2CS-Net-models/MPIIGaze/fold0.pkl'
 
-    transformations = transforms.Compose([
+    transformations_L2CS = transforms.Compose([
         transforms.Resize(448),
         transforms.ToTensor(),
         transforms.Normalize(
@@ -164,6 +161,12 @@ def detect(save_img=False):
     idx_tensor = torch.FloatTensor(idx_tensor).cuda(gpu)
     x=0
     # End L2CS-Net
+
+    transformations_6D = transforms.Compose([transforms.Resize(224),
+                                      transforms.CenterCrop(224),
+                                      transforms.ToTensor(),
+                                      transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+
 
     # 6D_Repnet
     snapshot_path_6D = '../weights/6DRepNet/6DRepNet_300W_LP_AFLW2000.pth'
@@ -208,6 +211,10 @@ def detect(save_img=False):
     left_eye_img = cv2.resize(left_eye_img,(eye_w_roi,eye_h_roi))
 
     t0 = time.time()
+    # crate img queue
+    img_queue = queue.Queue()
+    fps_queue = queue.Queue()
+
     for path, img, im0s, vid_cap in dataset:
 
         img = torch.from_numpy(img).to(device)
@@ -237,6 +244,7 @@ def detect(save_img=False):
         # Apply Classifier
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
+    
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image
@@ -313,7 +321,7 @@ def detect(save_img=False):
                 # img_L2CS = cv2.resize(img_L2CS, (224, 224))
                 # img_L2CS = cv2.cvtColor(img_L2CS, cv2.COLOR_BGR2RGB)
                 # im_pil = Image.fromarray(img_L2CS)
-                # img_L2CS =transformations(im_pil)
+                # img_L2CS =transformations_L2CS(im_pil)
                 # img_L2CS  = Variable(img_L2CS).cuda(gpu)
                 # img_L2CS  = img_L2CS.unsqueeze(0) 
 
@@ -349,7 +357,7 @@ def detect(save_img=False):
                 img = im0[y_min:y_max, x_min:x_max]
                 img = Image.fromarray(img)
                 img = img.convert('RGB')
-                img = transformations(img)
+                img = transformations_6D(img)
 
                 img = torch.Tensor(img[None, :]).to(device)
 
@@ -361,18 +369,19 @@ def detect(save_img=False):
                 y_pred_deg = euler[:, 1].cpu()
                 r_pred_deg = euler[:, 2].cpu()
 
-                utils_with_6D.plot_pose_cube(im0,  y_pred_deg, p_pred_deg, r_pred_deg, x_min + int(.5*(
-                    x_max-x_min)), y_min + int(.5*(y_max-y_min)), size=bbox_width)
-                
+                # utils_with_6D.plot_pose_cube(im0,  y_pred_deg, p_pred_deg, r_pred_deg, x_min + int(.5*(
+                #     x_max-x_min)), y_min + int(.5*(y_max-y_min)), size=bbox_width)
+                height, width = im0.shape[:2]
+                tdx = width - 70
+                tdy = 70
+                utils_with_6D.draw_axis(im0,y_pred_deg,p_pred_deg,r_pred_deg,tdx,tdy, size = 50)
+                utils_with_6D.draw_gaze_6D(nose_center_point,driver_face_roi,im0,(p_pred_deg,y_pred_deg),color=(0,0,255))
+    
                 # End 6DRepNet
 
                 # pupil left
                 flag_list = [1,1,1,1,1,1,1]
-                if len(pupil_left) > 0:
-                    left_center = pupil_fit(im0,pupil_left,flag_list)
-                # pupil right
-                if len(pupil_right) > 0:
-                    right_center = pupil_fit(im0,pupil_right,flag_list)
+
                 if len(eye_left) > 0:
                     # print("eye_left",eye_left)
                     left_eye_img = im0[eye_left[1]:eye_left[3],eye_left[0]:eye_left[2],:]
@@ -382,9 +391,19 @@ def detect(save_img=False):
                     right_eye_img = im0[eye_right[1]:eye_right[3],eye_right[0]:eye_right[2],:]
                     right_eye_img = cv2.resize(right_eye_img,(eye_w_roi,eye_h_roi))
 
+                # rotation_matrix = utils_with_6D.get_rotation_matrix(y_pred_deg, p_pred_deg, r_pred_deg)
+                # rotation_left_eye_img = cv2.warpAffine(left_eye_img, rotation_matrix, (left_eye_img.shape[1], left_eye_img.shape[0]))
+
+                if len(pupil_left) > 0:
+                    left_center = pupil_fit(im0,pupil_left,flag_list)
+                # pupil right
+                if len(pupil_right) > 0:
+                    right_center = pupil_fit(im0,pupil_right,flag_list)
+                
                 # update eye image
                 im0[0:eye_h_roi,0:eye_w_roi,:] = left_eye_img
                 im0[0:eye_h_roi,eye_w_roi:2*eye_w_roi,:]  = right_eye_img
+                # im0[eye_h_roi:2*eye_h_roi,0:eye_w_roi,:] = rotation_left_eye_img
 
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
@@ -404,10 +423,14 @@ def detect(save_img=False):
             print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
 
             # Stream results
+            
+
             if view_img:
                 # if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_AUTOSIZE) < 0:
                 #     break
                 fps = 1.0 / (end - start)
+                # display_img = img_queue.get()
+                # display_fps = fps_queue.get()
                 # fps = curr_fps if fps == 0.0 else (fps*0.95 + curr_fps*0.05)
                 im0 = show_fps(im0, fps)
                 cv2.imshow(WINDOW_NAME, im0)
@@ -421,10 +444,10 @@ def detect(save_img=False):
                     print("")
                     cv2.destroyAllWindows()
                     return 0
-                elif key == ord('F') or key == ord('f'):  # Toggle fullscreen
-                    full_scrn = not full_scrn
-                    # print(full_scrn)
-                    set_display(WINDOW_NAME, full_scrn)
+                # elif key == ord('F') or key == ord('f'):  # Toggle fullscreen
+                #     full_scrn = not full_scrn
+                #     # print(full_scrn)
+                #     set_display(WINDOW_NAME, full_scrn)
                     
 
             # Save results (image with detections)
