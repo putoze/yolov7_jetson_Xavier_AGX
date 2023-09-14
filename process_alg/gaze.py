@@ -80,6 +80,8 @@ def mean_angular_error(a, b):
 def draw_gaze(image_in, eye_pos, pitchyaw, length=40.0, thickness=2, color=(0, 0, 255)):
     """Draw gaze angle on given image with a given eye positions."""
     image_out = image_in
+    (h, w) = image_in.shape[:2]
+    # length = w/2
     if len(image_out.shape) == 2 or image_out.shape[2] == 1:
         image_out = cv.cvtColor(image_out, cv.COLOR_GRAY2BGR)
     dx = -length * np.sin(pitchyaw[1])
