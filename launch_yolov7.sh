@@ -48,6 +48,10 @@ echo [4]: yolov8-lite-s.onnx
 echo ----------------
 echo [5]: yolov7-tiny-20230831-five-direct-2200epoch.pt
 echo ----------------
+echo [6]: yolov7-tiny-9cs-70cm-20230916-600epoch.pt
+echo ----------------
+echo [7]: yolov7-tiny-5cs-50cm-20230916-600epoch.pt
+echo ----------------
 echo [n]: None
 echo -n "Press enter to start it:"
 
@@ -71,6 +75,12 @@ fi
 if [ $MY_Weights -eq 5 ] ; then
     Weights='yolov7-tiny-20230831-five-direct-2200epoch.pt'
 fi 
+if [ $MY_Weights -eq 6 ] ; then
+    Weights='yolov7-tiny-9cs-70cm-20230916-600epoch.pt'
+fi
+if [ $MY_Weights -eq 7 ] ; then
+    Weights='yolov7-tiny-5cs-50cm-20230916-600epoch.pt'
+fi
 
 echo $Weights
 
@@ -135,12 +145,14 @@ if [ $MY_mode -eq 1 ] ; then
     --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output29.avi \
-    --view-img
+    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output30.avi \
+    --no-trace
+    # --source /media/joe/Xavierssd/20230816_window_video/20230318205957.mp4
 
 fi
 
 #============================================================================ 
+
 if [ $MY_mode -eq 2 ] ; then
     echo ============
     echo 「otocam detect L2CS」
@@ -165,8 +177,8 @@ if [ $MY_mode -eq 3 ] ; then
     --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output29.avi
-
+    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output29.avi \
+    --no-trace
 fi
 
 #============================================================================ 

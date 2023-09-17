@@ -493,12 +493,12 @@ def detect(save_img=False):
                     print("")
                     cv2.destroyAllWindows()
                     return 0
+                
                 # elif key == ord('F') or key == ord('f'):  # Toggle fullscreen
                 #     full_scrn = not full_scrn
                 #     # print(full_scrn)
                 #     set_display(WINDOW_NAME, full_scrn)
                     
-
             # Save results (image with detections)
             if save_img:
                 if dataset.mode == 'image':

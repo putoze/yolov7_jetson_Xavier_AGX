@@ -47,7 +47,7 @@ def detect(save_img=False):
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
     
     full_scrn = False
-    model_name = '../landmark-model/shape_predictor_68_face_landmarks_GTX.dat'
+    model_name = '../weights/landmark-model/shape_predictor_68_face_landmarks_GTX.dat'
     predictor = dlib.shape_predictor(model_name)
     # open_window(WINDOW_NAME)
 
@@ -139,6 +139,8 @@ def detect(save_img=False):
             save_path = str(save_dir / p.name)  # img.jpg
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+
+            start = time.time()
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -181,17 +183,18 @@ def detect(save_img=False):
                     if save_img or view_img:  # Add bbox to image
                         label = f'{names[int(cls)]} {conf:.2f}'
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
-                        fps = 1.0 / (t2 - t1)
-                        # fps = curr_fps if fps == 0.0 else (fps*0.95 + curr_fps*0.05)
-                        im0 = show_fps(im0, fps)
+
                         
             # Print time (inference + NMS)
+            end = time.time()
             print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
 
             # Stream results
             if view_img:
                 # if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_AUTOSIZE) < 0:
                 #     break
+                fps = 1.0 / (end - start)
+                im0 = show_fps(im0, fps)
                 cv2.imshow(WINDOW_NAME, im0)
                 key = cv2.waitKey(1)
                 # cv2.imshow(str(p), im0)
