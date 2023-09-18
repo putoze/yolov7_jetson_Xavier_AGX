@@ -77,7 +77,7 @@ def mean_angular_error(a, b):
     """Calculate mean angular error (via cosine similarity)."""
     return np.mean(angular_error(a, b))
 
-def draw_gaze(image_in, eye_pos, pitchyaw, length=40.0, thickness=2, color=(0, 0, 255)):
+def draw_gaze(image_in, eye_pos, pitchyaw, length=60.0, thickness=2, color=(0, 0, 255)):
     """Draw gaze angle on given image with a given eye positions."""
     image_out = image_in
     (h, w) = image_in.shape[:2]
@@ -89,4 +89,5 @@ def draw_gaze(image_in, eye_pos, pitchyaw, length=40.0, thickness=2, color=(0, 0
     cv.arrowedLine(image_out, tuple(np.round(eye_pos).astype(np.int32)),
                    tuple(np.round([eye_pos[0] + dx, eye_pos[1] + dy]).astype(int)), color,
                    thickness, cv.LINE_AA, tipLength=0.2)
+    
     return image_out

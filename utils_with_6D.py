@@ -213,24 +213,43 @@ def get_R(x,y,z):
     return R
 
 
-def draw_gaze_6D(nose_pos,driver_face_roi,image_in, R, thickness=2, color=(255, 255, 0),sclae=2.0):
+# def draw_gaze_6D(nose_pos,driver_face_roi,image_in, R, thickness=2, color=(255, 255, 0),sclae=2.0):
+#     """Draw gaze angle on given image with a given eye positions."""
+#     image_out = image_in
+#     xmin,ymin,xmax,ymax = driver_face_roi
+
+#     head_direction = np.array([0,0,1])
+#     direction = np.dot(R, head_direction)
+
+#     (h, w) = image_in[xmin:xmax,ymin:ymax].shape[:2]
+#     length = w/2
+#     if len(image_out.shape) == 2 or image_out.shape[2] == 1:
+#         image_out = cv2.cvtColor(image_out, cv2.COLOR_GRAY2BGR)
+        
+#     dx = -length * direction[0]
+#     dy = -length * direction[1]
+#     cv2.arrowedLine(image_out, tuple(np.round(nose_pos).astype(np.int32)),
+#                    tuple(np.round([nose_pos[0] + dx, nose_pos[1] + dy]).astype(int)), color,
+#                    thickness, cv2.LINE_AA, tipLength=0.18)
+    
+#     return image_out    
+
+def draw_gaze_6D(nose_pos,image_in, yaw, pitch, length=200, thickness=2, color=(255, 255, 0),sclae=2.0):
     """Draw gaze angle on given image with a given eye positions."""
     image_out = image_in
-    xmin,ymin,xmax,ymax = driver_face_roi
 
-    head_direction = np.array([0,0,1])
-    direction = np.dot(R, head_direction)
+    pitch = pitch * np.pi / 180
+    yaw = -(yaw * np.pi / 180)
 
-    (h, w) = image_in[xmin:xmax,ymin:ymax].shape[:2]
-    length = w/2
     if len(image_out.shape) == 2 or image_out.shape[2] == 1:
         image_out = cv2.cvtColor(image_out, cv2.COLOR_GRAY2BGR)
-        
-    dx = -length * direction[0]
-    dy = -length * direction[1]
+
+    # Z-Axis (out of the screen) drawn in blue
+    tdx = length * (sin(yaw))
+    tdy = length * (-cos(yaw) * sin(pitch)) 
+
     cv2.arrowedLine(image_out, tuple(np.round(nose_pos).astype(np.int32)),
-                   tuple(np.round([nose_pos[0] + dx, nose_pos[1] + dy]).astype(int)), color,
+                   tuple(np.round([nose_pos[0] + tdx, nose_pos[1] + tdy]).astype(int)), color,
                    thickness, cv2.LINE_AA, tipLength=0.18)
     
-    return image_out    
-
+    return image_out  

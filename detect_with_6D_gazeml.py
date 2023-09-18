@@ -44,31 +44,13 @@ from utils.torch_utils import select_device, load_classifier, time_synchronized,
 # Self add
 WINDOW_NAME = 'Yolov7-Tiny Demo'
 
-def getArch(arch,bins):
-    # Base network structure
-    if arch == 'ResNet18':
-        model = L2CS( torchvision.models.resnet.BasicBlock,[2, 2,  2, 2], bins)
-    elif arch == 'ResNet34':
-        model = L2CS( torchvision.models.resnet.BasicBlock,[3, 4,  6, 3], bins)
-    elif arch == 'ResNet101':
-        model = L2CS( torchvision.models.resnet.Bottleneck,[3, 4, 23, 3], bins)
-    elif arch == 'ResNet152':
-        model = L2CS( torchvision.models.resnet.Bottleneck,[3, 8, 36, 3], bins)
-    else:
-        if arch != 'ResNet50':
-            print('Invalid value for architecture is passed! '
-                'The default value of ResNet50 will be used instead!')
-        model = L2CS( torchvision.models.resnet.Bottleneck, [3, 4, 6,  3], bins)
-    return model
-    
-
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
     
-    full_scrn = False
+    show_text = True
     open_window(WINDOW_NAME,'yolov7-tiny')
 
     # Directories
@@ -116,36 +98,6 @@ def detect(save_img=False):
     old_img_w = old_img_h = imgsz
     old_img_b = 1
 
-    # L2CS-Net
-    cudnn.enabled = True
-    arch='ResNet50'
-    batch_size = 1
-    gpu = select_device(opt.device, batch_size=batch_size)
-    snapshot_path_L2CS = '../weights/L2CS-Net-models/Gaze360/L2CSNet_gaze360.pkl'
-    # snapshot_path = '../L2CS-Net-models/MPIIGaze/fold0.pkl'
-
-    transformations_L2CS = transforms.Compose([
-        transforms.Resize(448),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
-        )
-    ])
-    
-    modelL2CS=getArch(arch, 90)
-    print('Loading snapshot.')
-    saved_state_dict = torch.load(snapshot_path_L2CS)
-    modelL2CS.load_state_dict(saved_state_dict)
-    modelL2CS.cuda(gpu)
-    modelL2CS.eval()
-
-    softmax = nn.Softmax(dim=1)
-    # detector = RetinaFace(gpu_id=0)
-    idx_tensor = [idx for idx in range(90)]
-    idx_tensor = torch.FloatTensor(idx_tensor).cuda(gpu)
-    x=0
-    # End L2CS-Net
 
     transformations_6D = transforms.Compose([transforms.Resize(224),
                                       transforms.CenterCrop(224),
@@ -178,12 +130,10 @@ def detect(save_img=False):
     # ---------------------------
     # ------ face imformation ------
     nose_center_point = (0,0)
-    mouse_center_point = (0,0)
     left_eye_center = (0,0)
     right_eye_center = (0,0)
-    eye_w_roi = 150
-    eye_h_roi = 75
-    driver_face_roi = [0,100,0,100]
+    eye_w_roi = 100
+    eye_h_roi = 50
     #------ Thresh ------
     El_right_eye_thresh_global = ()
     El_left_eye_thresh_global = ()
@@ -198,6 +148,9 @@ def detect(save_img=False):
     #------ length ------
     right_eye_length = 0
     left_eye_length = 0
+    #------ put txt ------
+    base_txt_height = 35 + eye_h_roi
+    gap_txt_height = 35
 
     t0 = time.time()
 
@@ -262,6 +215,7 @@ def detect(save_img=False):
                 eye_left  = []
                 pupil_left = []
                 pupil_right = []
+                mouse_roi = []
 
                 driver_face_local = []
                 # find driver face
@@ -273,65 +227,33 @@ def detect(save_img=False):
                             face_max = face_area
                             driver_face_local = bb
 
-                if len(driver_face_local) != 0:
-                    driver_face_roi = driver_face_local
+                if len(driver_face_local) == 0:
+                    break
 
                 # find all boundary of face     
                 for *xyxy, conf, cls in reversed(det):
                     bb = [int(x) for x in xyxy]
                     center = (bb[0]+(bb[2]-bb[0])/2,bb[1]+(bb[3]-bb[1])/2)
-                    if (center[0] > driver_face_roi[0] and center[0] < driver_face_roi[2]) \
-                    and (center[1] > driver_face_roi[1] and center[1] < driver_face_roi[3]):
+                    # if cs of landmark center inside the driver face
+                    if (center[0] > driver_face_local[0] and center[0] < driver_face_local[2]) \
+                    and (center[1] > driver_face_local[1] and center[1] < driver_face_local[3]):
                         if names[int(cls)] == 'eye' and bb[3] < nose_center_point[1]:
-                            if (center[0] < nose_center_point[0] or center[0] < mouse_center_point[0]):
+                            if (center[0] < nose_center_point[0]):
                                 eye_left = bb
                             else:
                                 eye_right = bb
                         if names[int(cls)] == 'pupil' and bb[3] < nose_center_point[1]:
-                            if (center[0] < nose_center_point[0]
-                            or center[0] < mouse_center_point[0]):
+                            if (center[0] < nose_center_point[0]):
                                 pupil_left = bb
                             else :
                                 pupil_right = bb
                         if names[int(cls)] == 'nose' :
                             nose_center_point = center
                         if names[int(cls)] == 'mouse':
-                            mouse_center_point = center
-
-                # L2CS-Net
-                # x_min,y_min,x_max,y_max = driver_face_roi
-                # bbox_width = x_max - x_min
-                # bbox_height = y_max - y_min
-
-                # img_L2CS = im0[y_min:y_max, x_min:x_max]
-                # img_L2CS = cv2.resize(img_L2CS, (224, 224))
-                # img_L2CS = cv2.cvtColor(img_L2CS, cv2.COLOR_BGR2RGB)
-                # im_pil = Image.fromarray(img_L2CS)
-                # img_L2CS =transformations_L2CS(im_pil)
-                # img_L2CS  = Variable(img_L2CS).cuda(gpu)
-                # img_L2CS  = img_L2CS.unsqueeze(0) 
-
-                # # gaze prediction
-                # gaze_pitch, gaze_yaw = modelL2CS(img_L2CS)
-
-                # pitch_predicted = softmax(gaze_pitch)
-                # yaw_predicted = softmax(gaze_yaw)
-
-                # # Get continuous predictions in degrees.
-                # pitch_predicted = torch.sum(pitch_predicted.data[0] * idx_tensor) * 4 - 180
-                # yaw_predicted = torch.sum(yaw_predicted.data[0] * idx_tensor) * 4 - 180
-
-                # pitch_predicted= pitch_predicted.cpu().detach().numpy()* np.pi/180.0
-                # yaw_predicted= yaw_predicted.cpu().detach().numpy()* np.pi/180. 
-                
-                    
-                # draw_gaze(x_min,y_min,bbox_width, bbox_height,im0,(pitch_predicted,yaw_predicted),color=(0,0,255))
-                # cv2.rectangle(im0, (x_min, y_min), (x_max, y_max), (0,255,0), 1)
-
-                # End L2CS-Net
+                            mouse_roi = bb
 
                 # 6DRepNet
-                x_min,y_min,x_max,y_max = driver_face_roi
+                x_min,y_min,x_max,y_max = driver_face_local
                 bbox_width = abs(x_max - x_min)
                 bbox_height = abs(y_max - y_min)
 
@@ -361,10 +283,10 @@ def detect(save_img=False):
                 tdx = width - 70
                 tdy = 70
 
-                R_headpose = utils_with_6D.get_R(r_pred_deg,y_pred_deg,p_pred_deg)
+                # R_headpose = utils_with_6D.get_R(r_pred_deg,y_pred_deg,p_pred_deg)
                 utils_with_6D.draw_axis(im0,y_pred_deg,p_pred_deg,r_pred_deg,tdx,tdy, size = 50)
-                utils_with_6D.draw_gaze_6D(nose_center_point,driver_face_roi,im0,R_headpose,color=(0,0,255))
-    
+                utils_with_6D.draw_gaze_6D(nose_center_point,im0,y_pred_deg,p_pred_deg,color=(0,0,255))
+
                 # End 6DRepNet
 
                 # pupil left
@@ -420,7 +342,6 @@ def detect(save_img=False):
                     # create a circle to reduce shade effect
                     cv2.circle(pupil_right_img,pupil_right_center,radius_right,(0,0,0),thickness=cv2.FILLED)
                     El_right_iris_thresh = find_max_Thresh(pupil_right_img,flag_list)
-                    
                     if El_right_iris_thresh != None:
                         El_right_iris_thresh_global = ((El_right_iris_thresh[0][0] + pupil_right[0], El_right_iris_thresh[0][1] \
                                                     + pupil_right[1]),El_right_iris_thresh[1],El_right_iris_thresh[2])
@@ -437,7 +358,6 @@ def detect(save_img=False):
                 #     eye_gaze = np.mean(eye_gaze, axis=0)
                 #     y_pred_deg += 
                 #     R_headpose = utils_with_6D.get_R(r_pred_deg,y_pred_deg,p_pred_deg)
-
 
                 # update eye image
                 if len(eye_left) > 0:
@@ -471,9 +391,25 @@ def detect(save_img=False):
             end = time.time()
             print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
 
+            if show_text:
+                pitch_str = str(round(p_pred_deg[0].item(), 3))
+                yaw_str = str(-(round(y_pred_deg[0].item(), 3)))
+                roll_str = str(round(r_pred_deg[0].item(), 3))
+                #(img, text, org, fontFace, fontScale, color, thickness, lineType)
+                next_txt_height = base_txt_height
+                cv2.putText(im0,"HEAD-POSE",(0,next_txt_height), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                next_txt_height += gap_txt_height
+                cv2.putText(im0,"roll:"+roll_str,(0,next_txt_height), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+                next_txt_height += gap_txt_height
+                cv2.putText(im0,"yaw:"+yaw_str,(0,next_txt_height), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                next_txt_height += gap_txt_height
+                cv2.putText(im0,"pitch:"+pitch_str,(0,next_txt_height), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                
             # Stream results
-            
-
             if view_img:
                 # if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_AUTOSIZE) < 0:
                 #     break
@@ -493,6 +429,8 @@ def detect(save_img=False):
                     print("")
                     cv2.destroyAllWindows()
                     return 0
+                elif key == ord('T') or key == ord('t'):  # Toggle fullscreen
+                    show_text = not show_text
                 
                 # elif key == ord('F') or key == ord('f'):  # Toggle fullscreen
                 #     full_scrn = not full_scrn
