@@ -55,7 +55,6 @@ def find_max_Thresh(input_img,flag_list):
         contours, _ = cv2.findContours(target_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         # cv2.drawContours(target_img, contours, 3, (0, 255, 0), 3)
 
-
     # to show image or not
     # if flag_list[1]:
     #     cv2.imshow("binary Image", cv2.resize(binary,(100,100)))
@@ -93,7 +92,7 @@ def find_max_Thresh(input_img,flag_list):
 
         # Avoid to break the system
         if(contour_pt_array.shape[0] < 5):
-            return 0
+            return None
         
         elPupilThresh = cv2.fitEllipse(contour_pt_array)
 
@@ -127,10 +126,32 @@ def find_ellipse_point(num_points,elthresh):
 
     return np.array(ellipse_points)
 
+def find_yolo_ellipse_point(num_points,center,axes):
+    angle_step = 360 / num_points
+    ellipse_points = []
+    for i in range(num_points):
+        angle_deg = angle_step * i
+        angle_rad = np.radians(angle_deg)
+        x_point = center[0] + (axes[0] / 2) * np.cos(angle_rad)
+        y_point = center[1] + (axes[1] / 2) * np.sin(angle_rad)
+        ellipse_points.append([x_point, y_point])
+
+    return np.array(ellipse_points)
+
 def draw_ellipse_point(img,ellipse_points,elPupilThresh):
     img_out = img
     # cv2.ellipse(img_out, elPupilThresh, (0, 255, 0), 2)
     center_point = (int(elPupilThresh[0][0]),int(elPupilThresh[0][1]))
+    cv2.circle(img_out, center_point, 3, (0, 0, 255), -1)
+    for pt in ellipse_points:
+        point = (int(pt[0]),int(pt[1]))
+        cv2.circle(img_out, point, 2, (0, 255, 0), -1)
+
+    return img_out
+
+def draw_yolo_ellipse_point(img,ellipse_points,center_point):
+    img_out = img
+    # cv2.ellipse(img_out, elPupilThresh, (0, 255, 0), 2)
     cv2.circle(img_out, center_point, 3, (0, 0, 255), -1)
     for pt in ellipse_points:
         point = (int(pt[0]),int(pt[1]))

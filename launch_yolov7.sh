@@ -129,7 +129,7 @@ if [ $MY_mode -eq 0 ] ; then
     --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source /media/joe/Xavierssd/2023_0912_training_data_set/rain_phone_seatbelt/ \
+    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/img_new/all/ \
     --save-txt
     # --weight ./torch_yolov7_weight/yolov7-custom_v3/best.pt \
     
@@ -234,6 +234,7 @@ if [ $MY_mode -eq 6 ] ; then
     --img-size 640 \
     --source cam.txt \
     --no-trace 
+    
 fi
 
 #============================================================================ 
