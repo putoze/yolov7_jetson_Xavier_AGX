@@ -47,7 +47,7 @@ def detect(save_img=False):
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
     
     full_scrn = False
-    model_name = '../weights/landmark-model/shape_predictor_68_face_landmarks_GTX.dat'
+    model_name = '../weights/landmark-model/shape_predictor_5_face_landmarks.dat'
     predictor = dlib.shape_predictor(model_name)
     # open_window(WINDOW_NAME)
 

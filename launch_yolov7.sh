@@ -52,8 +52,11 @@ echo [6]: yolov7-tiny-9cs-70cm-20230916-600epoch.pt
 echo ----------------
 echo [7]: yolov7-tiny-5cs-50cm-20230916-600epoch.pt
 echo ----------------
+echo [8]: yolov7-tiny-9cs-20230916-50_70cm-600epoch.pt
+echo ----------------
 echo [n]: None
 echo -n "Press enter to start it:"
+
 
 read MY_Weights
 
@@ -81,6 +84,10 @@ fi
 if [ $MY_Weights -eq 7 ] ; then
     Weights='yolov7-tiny-5cs-50cm-20230916-600epoch.pt'
 fi
+if [ $MY_Weights -eq 8 ] ; then
+    Weights='yolov7-tiny-9cs-20230916-50_70cm-600epoch.pt'
+fi
+
 
 echo $Weights
 
@@ -234,7 +241,7 @@ if [ $MY_mode -eq 6 ] ; then
     --img-size 640 \
     --source cam.txt \
     --no-trace 
-    
+
 fi
 
 #============================================================================ 

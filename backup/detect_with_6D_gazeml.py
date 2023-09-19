@@ -157,7 +157,7 @@ def detect(save_img=False):
     base_txt_height = 35 + eye_h_roi
     gap_txt_height = 35
     #------ gaze flag ------
-    gaze_model_flag = 0
+    gaze_model_flag = 1
 
     t0 = time.time()
 
@@ -222,7 +222,6 @@ def detect(save_img=False):
                 pupil_left = []
                 pupil_right = []
                 mouse_roi = []
-                pupil = []
 
                 driver_face_local = []
                 # find driver face
@@ -240,7 +239,7 @@ def detect(save_img=False):
                 # find all boundary of face     
                 for *xyxy, conf, cls in reversed(det):
                     bb = [int(x) for x in xyxy]
-                    center = ((bb[0]+bb[2])/2,(bb[3]+bb[1])/2)
+                    center = (bb[0]+(bb[2]-bb[0])/2,bb[1]+(bb[3]-bb[1])/2)
                     # if cs of landmark center inside the driver face
                     if (center[0] > driver_face_local[0] and center[0] < driver_face_local[2]) \
                     and (center[1] > driver_face_local[1] and center[1] < driver_face_local[3]):
@@ -250,27 +249,14 @@ def detect(save_img=False):
                             else:
                                 eye_right = bb
                         if names[int(cls)] == 'pupil' and bb[3] < nose_center_point[1]:
-                            pupil.append(bb)
+                            if (center[0] < nose_center_point[0]):
+                                pupil_left = bb
+                            else :
+                                pupil_right = bb
                         if names[int(cls)] == 'nose' :
                             nose_center_point = center
                         if names[int(cls)] == 'mouse':
                             mouse_roi = bb
-
-                # find pupil roi
-                for bb in pupil:
-                    center = ((bb[0]+bb[2])/2,(bb[3]+bb[1])/2) 
-                    if center[0] < nose_center_point[0]:
-                        if len(eye_left) != 0:
-                            if bb[2] < eye_left[2] and bb[0] > eye_left[0]:
-                                pupil_left = bb
-                        else:
-                            pupil_left = bb
-                    else:
-                        if len(eye_right) != 0:
-                            if bb[2] < eye_right[2] and bb[0] > eye_right[0]:
-                                pupil_right = bb
-                        else:
-                            pupil_right = bb
 
                 # 6DRepNet
                 x_min,y_min,x_max,y_max = driver_face_local
@@ -312,89 +298,98 @@ def detect(save_img=False):
                 # pupil left
                 flag_list = [1,1,1,1,1,1,1]
 
-                if abs(y_pred_deg[0].item()) < 30.0:
-                    rect = dlib.rectangle(driver_face_local[0],driver_face_local[1],driver_face_local[2],driver_face_local[3])
-                    shape = predictor(im0, rect)
-                    shape = face_utils.shape_to_np(shape)
-                    gaze_model_flag = 1
-                else:
-                    gaze_model_flag = 0
-                    
+                # ellipse fit eye and define eye region
+                if len(eye_left) > 0:
+                    left_eye_img = im0[eye_left[1]:eye_left[3],eye_left[0]:eye_left[2],:]
+                    # El_left_eye_thresh = find_max_Thresh(left_eye_img,flag_list)
+                    # El_left_eye_thresh_global = ((El_left_eye_thresh[0][0] + eye_left[0], El_left_eye_thresh[0][1] \
+                    #                               + eye_left[1]),El_left_eye_thresh[1],El_left_eye_thresh[2])
+                    # cv2.ellipse(im0, El_left_eye_thresh_global, (255, 0, 0), 2)
+                    # left_eye_center = El_left_eye_thresh_global[0]
+                    # left_eye_length = El_left_eye_thresh_global[1][0]
+                    left_eye_center = (eye_left[0]+(eye_left[2]-eye_left[0])/2,eye_left[1]+(eye_left[3]-eye_left[1])/2)
+                    left_eye_length = (eye_left[2]-eye_left[0])/2
+                if len(eye_right) > 0:
+                    right_eye_img = im0[eye_right[1]:eye_right[3],eye_right[0]:eye_right[2],:]
+                    # El_right_eye_thresh = find_max_Thresh(right_eye_img,flag_list)
+                    # El_right_eye_thresh_global = ((El_right_eye_thresh[0][0] + eye_right[0], El_right_eye_thresh[0][1] \
+                    #                               + eye_right[1]),El_right_eye_thresh[1],El_right_eye_thresh[2])
+                    # cv2.ellipse(im0, El_right_eye_thresh_global, (255, 0, 0), 2)
+                    # right_eye_center = El_right_eye_thresh_global[0]
+                    # right_eye_length = El_right_eye_thresh_global[1][0]
+                    right_eye_center = (eye_right[0]+(eye_right[2]-eye_right[0])/2,eye_right[1]+(eye_right[3]-eye_right[1])/2)
+                    right_eye_length = (eye_right[2]-eye_right[0])/2
+
                 # ellipse fit left pupil and gaze estimate
-                if len(pupil_left) > 0 and gaze_model_flag == 1:
-                    # facelandmark
-                    if len(eye_left) > 0:
-                        # left eye left
-                        if shape[0][0] > eye_left[0] and shape[0][0] < eye_left[2] and shape[0][1] > eye_left[1] \
-                        and shape[0][1] < eye_left[3]:
-                            eye_left_loc_l = (shape[0][0], shape[0][1])
-                        else:
-                            eye_left_loc_l = (int(eye_left[0]),int((eye_left[3]+eye_left[1])/2))
-                        # left eye right
-                        if shape[1][0] > eye_left[0] and shape[1][0] < eye_left[2] and shape[1][1] > eye_left[1] \
-                        and shape[1][1] < eye_left[3]:
-                            eye_left_loc_r = (shape[1][0], shape[1][1])
-                        else:
-                            eye_left_loc_r = (int(eye_left[2]),int((eye_left[3]+eye_left[1])/2))
-                    else :
-                        eye_left_loc_l = (shape[0][0], shape[0][1])
-                        eye_left_loc_r = (shape[1][0], shape[1][1])
-
-                    #draw eye points
-                    cv2.circle(im0, eye_left_loc_l, 2, (0, 0, 255), -1)
-                    cv2.circle(im0, eye_left_loc_r, 2, (0, 0, 255), -1)
-
-                    # define eye loc/center/length
-                    left_eye_center = ((eye_left_loc_l[0] + eye_left_loc_r[0])/2,(eye_left_loc_l[1] + eye_left_loc_r[1])/2)
-                    left_eye_length = eye_left_loc_r[0] - eye_left_loc_l[0]
-                    pupil_left_center = (int((pupil_left[0]+pupil_left[2])/2),int((pupil_left[1]+pupil_left[3])/2))
+                if len(pupil_left) > 0 and len(eye_left) > 0:
+                    # pupil_left_img = im0[pupil_left[1]:pupil_left[3],pupil_left[0]:pupil_left[2],:]
+                    # pupil_left_center = (int((pupil_left[0]+pupil_left[2])/2),int((pupil_left[1]+pupil_left[3])/2))
+                    # radius_left = int(min(pupil_left[3]-pupil_left[1],pupil_left[2]-pupil_left[0])/4*3)
+                    # # create a circle to reduce shade effect
+                    # cv2.circle(pupil_left_img,pupil_left_center,radius_left,(0,0,0),thickness=cv2.FILLED)
+                    # El_left_iris_thresh = find_max_Thresh(pupil_left_img,flag_list)
                     
-                    # define pupil imformation
-                    radius_left = (int(pupil_left[2]-pupil_left[0]),int(pupil_left[3]-pupil_left[1]))
-                    left_iris_ldmks = find_yolo_ellipse_point(num_iris_landmark,pupil_left_center,radius_left)
-                    im0 = draw_yolo_ellipse_point(im0,left_iris_ldmks,pupil_left_center)
-                    left_gaze = GM.estimate_gaze_from_landmarks(left_iris_ldmks, pupil_left_center, left_eye_center, left_eye_length)
+                    # if El_left_iris_thresh != None:
+                    #     El_left_iris_thresh_global = ((El_left_iris_thresh[0][0] + pupil_left[0], El_left_iris_thresh[0][1] \
+                    #                                 + pupil_left[1]),El_left_iris_thresh[1],El_left_iris_thresh[2])
+                    #     left_iris_ldmks = find_ellipse_point(num_iris_landmark,El_left_iris_thresh_global)
+                    #     im0 = draw_ellipse_point(im0,left_iris_ldmks,El_left_iris_thresh_global)
+                    #     left_gaze = GM.estimate_gaze_from_landmarks(left_iris_ldmks, El_left_iris_thresh_global[0], left_eye_center, left_eye_length)
+                    #     left_gaze = left_gaze.reshape(1, 2)
 
-                    left_gaze = left_gaze.reshape(1, 2)
-                    left_gaze[0][1] = -left_gaze[0][1]
-                    im0 = gaze_util.draw_gaze(im0,pupil_left_center,left_gaze[0])
+                    #     left_gaze[0][1] = -left_gaze[0][1]
+                    #     im0 = gaze_util.draw_gaze(im0,El_left_iris_thresh_global[0],left_gaze[0])
+                    if gaze_model_flag == 1 and abs(y_pred_deg[0].item()) < 30.0:
+                        # facelandmark
+                        rect = dlib.rectangle(driver_face_local[0],driver_face_local[1],driver_face_local[2],driver_face_local[3])
+                        shape = predictor(im0, rect)
+                        shape = face_utils.shape_to_np(shape)
+                        (x, y, w, h) = face_utils.rect_to_bb(rect)
+                        cv2.rectangle(im0, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                        # left
+                        if shape[0][0] > eye_left[0]:
+                            cv2.circle(im0, (shape[0][0], shape[0][1]), 1, (0, 0, 255), -1)
+                        
+                        pupil_left_center = (int((pupil_left[0]+pupil_left[2])/2),int((pupil_left[1]+pupil_left[3])/2))
+                        radius_left = (int(pupil_left[2]-pupil_left[0]),int(pupil_left[3]-pupil_left[1]))
+                        left_iris_ldmks = find_yolo_ellipse_point(num_iris_landmark,pupil_left_center,radius_left)
+                        im0 = draw_yolo_ellipse_point(im0,left_iris_ldmks,pupil_left_center)
+                        left_gaze = GM.estimate_gaze_from_landmarks(left_iris_ldmks, pupil_left_center, left_eye_center, left_eye_length)
+                    
+                        left_gaze = left_gaze.reshape(1, 2)
+                        left_gaze[0][1] = -left_gaze[0][1]
+                        im0 = gaze_util.draw_gaze(im0,pupil_left_center,left_gaze[0])
+
 
                 # ellipse fit right pupil and gaze estimate
-                if len(pupil_right) > 0 and gaze_model_flag == 1:
-                    # facelandmark
-                    if len(eye_right) > 0:
-                        # right eye right
-                        if shape[0][0] > eye_right[0] and shape[0][0] < eye_right[2] and shape[0][1] > eye_right[1] \
-                        and shape[0][1] < eye_right[3]:
-                            eye_right_loc_l = (shape[0][0], shape[0][1])
-                        else:
-                            eye_right_loc_l = (int(eye_right[0]),int((eye_right[3]+eye_right[1])/2))
-                        # right eye right
-                        if shape[1][0] > eye_right[0] and shape[1][0] < eye_right[2] and shape[1][1] > eye_right[1] \
-                        and shape[1][1] < eye_right[3]:
-                            eye_right_loc_r = (shape[1][0], shape[1][1])
-                        else:
-                            eye_right_loc_r = (int(eye_right[2]),int((eye_right[3]+eye_right[1])/2))
-                    else :
-                        eye_right_loc_l = (shape[0][0], shape[0][1])
-                        eye_right_loc_r = (shape[1][0], shape[1][1])
+                if len(pupil_right) > 0 and len(eye_right) > 0:
+                    # pupil_right_img = im0[pupil_right[1]:pupil_right[3],pupil_right[0]:pupil_right[2],:]
+                    # pupil_right_center = (int((pupil_right[0]+pupil_right[2])/2),int((pupil_right[1]+pupil_right[3])/2))
+                    # radius_right = int(min(pupil_right[3]-pupil_right[1],pupil_right[2]-pupil_right[0])/4*3)
+                    # # create a circle to reduce shade effect
+                    # cv2.circle(pupil_right_img,pupil_right_center,radius_right,(0,0,0),thickness=cv2.FILLED)
+                    # El_right_iris_thresh = find_max_Thresh(pupil_right_img,flag_list)
                     
-                    #draw eye points
-                    cv2.circle(im0, eye_right_loc_l, 2, (0, 0, 255), -1)
-                    cv2.circle(im0, eye_right_loc_r, 2, (0, 0, 255), -1)
-                    # define eye loc/center/length
-                    right_eye_center = ((eye_right_loc_l[0] + eye_right_loc_r[0])/2,(eye_right_loc_l[1] + eye_right_loc_r[1])/2)
-                    right_eye_length = eye_right_loc_r[0] - eye_right_loc_l[0]
-                    pupil_right_center = (int((pupil_right[0]+pupil_right[2])/2),int((pupil_right[1]+pupil_right[3])/2))
-                    # define pupil imformation
-                    radius_right = (int(pupil_right[2]-pupil_right[0]),int(pupil_right[3]-pupil_right[1]))
-                    right_iris_ldmks = find_yolo_ellipse_point(num_iris_landmark,pupil_right_center,radius_right)
-                    im0 = draw_yolo_ellipse_point(im0,right_iris_ldmks,pupil_right_center)
-                    right_gaze = GM.estimate_gaze_from_landmarks(right_iris_ldmks, pupil_right_center, right_eye_center, right_eye_length)
-                
-                    right_gaze = right_gaze.reshape(1, 2)
-                    right_gaze[0][1] = -right_gaze[0][1]
-                    im0 = gaze_util.draw_gaze(im0,pupil_right_center,right_gaze[0])
+                    # if El_right_iris_thresh != None:
+                    #     El_right_iris_thresh_global = ((El_right_iris_thresh[0][0] + pupil_right[0], El_right_iris_thresh[0][1] \
+                    #                                 + pupil_right[1]),El_right_iris_thresh[1],El_right_iris_thresh[2])
+                    #     right_iris_ldmks = find_ellipse_point(num_iris_landmark,El_right_iris_thresh_global)
+                    #     im0 = draw_ellipse_point(im0,right_iris_ldmks,El_right_iris_thresh_global)
+                    #     right_gaze = GM.estimate_gaze_from_landmarks(right_iris_ldmks, El_right_iris_thresh_global[0], right_eye_center, right_eye_length)
+                    #     right_gaze = right_gaze.reshape(1, 2)
+
+                    #     right_gaze[0][1] = -right_gaze[0][1]
+                    #     im0 = gaze_util.draw_gaze(im0,El_right_iris_thresh_global[0],right_gaze[0])
+                    if gaze_model_flag == 1:
+                        pupil_right_center = (int((pupil_right[0]+pupil_right[2])/2),int((pupil_right[1]+pupil_right[3])/2))
+                        radius_right = (int(pupil_right[2]-pupil_right[0]),int(pupil_right[3]-pupil_right[1]))
+                        right_iris_ldmks = find_yolo_ellipse_point(num_iris_landmark,pupil_right_center,radius_right)
+                        im0 = draw_yolo_ellipse_point(im0,right_iris_ldmks,pupil_right_center)
+                        right_gaze = GM.estimate_gaze_from_landmarks(right_iris_ldmks, pupil_right_center, right_eye_center, right_eye_length)
+
+                        right_gaze = right_gaze.reshape(1, 2)
+                        right_gaze[0][1] = -right_gaze[0][1]
+                        im0 = gaze_util.draw_gaze(im0,pupil_right_center,right_gaze[0])
 
 
                 # # headpose + gaze
