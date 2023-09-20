@@ -11,6 +11,7 @@ import re
 import math
 import os
 
+# 6D RepNet
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 from numpy.lib.function_base import _quantile_unchecked
 from matplotlib import pyplot as plt
@@ -20,21 +21,21 @@ import matplotlib
 matplotlib.use('TkAgg')
 
 import torch.nn as nn
-from utils_ten.display import open_window, show_fps, set_display
 from torch.autograd import Variable
 from torchvision import transforms
 import torchvision
 
+# landmark
 from PIL import Image
-from utils_L2CS import draw_gaze
 from PIL import Image, ImageOps
 from imutils import face_utils
 import dlib
 
-from model_L2CS import L2CS
+# self add
 from process_alg.fitEllipse import *
-import process_alg.gaze_modelbased as GM 
-import process_alg.gaze as gaze_util
+from utils_ten.display import open_window, show_fps, set_display
+import src.models.gaze_modelbased as GM
+import src.utils.gaze as gaze_util
 
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
@@ -45,6 +46,63 @@ from utils.torch_utils import select_device, load_classifier, time_synchronized,
 
 # Self add
 WINDOW_NAME = 'Yolov7-Tiny Demo'
+
+def clip_eye_region(eye_region_landmarks, image):
+    # Output size.
+    oh, ow = 36, 60
+
+    def process_coords(coords_list):
+        return np.array([(x, y) for (x, y) in coords_list])
+
+    def process_rescale_clip(eye_landmarks):
+        eye_width = 1.5 * abs(eye_landmarks[0][0] - eye_landmarks[1][0])
+        eye_middle = (eye_landmarks[0] + eye_landmarks[1]) / 2
+
+        recentre_mat = np.asmatrix(np.eye(3))
+        recentre_mat[0, 2] = -eye_middle[0] + 0.5 * eye_width
+        recentre_mat[1, 2] = -eye_middle[1] + 0.5 * oh / ow * eye_width
+
+        scale_mat = np.asmatrix(np.eye(3))
+        np.fill_diagonal(scale_mat, ow / eye_width)
+
+        transform_mat = recentre_mat * scale_mat
+
+        eye = cv2.warpAffine(image, transform_mat[:2, :3], (ow, oh))
+        eye = cv2.equalizeHist(eye)
+        eye = eye.astype(np.float32)
+        eye *= 2.0 / 255.0
+        eye -= 1.0
+        return eye, np.asarray(transform_mat)
+
+    left_eye_landmarks = process_coords(eye_region_landmarks[2:4])
+    right_eye_landmarks = process_coords(eye_region_landmarks[0:2])
+    left_eye_image, left_transform_mat = process_rescale_clip(left_eye_landmarks)
+    right_eye_image, right_transform_mat = process_rescale_clip(right_eye_landmarks)
+    
+    return [left_eye_image, left_transform_mat], [right_eye_image, right_transform_mat]
+
+def estimate_gaze(eye_image, transform_mat, model, is_left: bool):
+    eye_image = np.expand_dims(eye_image, -1)
+    # Change format to NCHW.
+    eye_image = np.transpose(eye_image, (2, 0, 1))
+    eye_image = torch.unsqueeze(torch.Tensor(eye_image), dim=0)
+    eye_input = eye_image.cuda()
+    # Do predict by elg_model.
+    heatmaps_predict, ldmks_predict, radius_predict = model(eye_input)
+    # Get parameters for model_based gaze estimator.
+    ldmks = ldmks_predict.cpu().detach().numpy()
+    iris_ldmks = np.array(ldmks[0][0:8])
+    iris_center = np.array(ldmks[0][-2])
+    eyeball_center = np.array(ldmks[0][-1])
+    eyeball_radius = radius_predict.cpu().detach().numpy()[0]
+    # Predict gaze.
+    gaze_predict = GM.estimate_gaze_from_landmarks(iris_ldmks, iris_center, eyeball_center, eyeball_radius)
+    predict = gaze_predict.reshape(1, 2)
+    iris_center = ldmks_predict[0].cpu().detach().numpy()[16]
+    if is_left:
+        iris_center[0] = 60 - iris_center[0]
+    iris_center = (iris_center - [transform_mat[0][2], transform_mat[1][2]]) / transform_mat[0][0]
+    return predict, iris_center
 
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
@@ -100,7 +158,6 @@ def detect(save_img=False):
     old_img_w = old_img_h = imgsz
     old_img_b = 1
 
-
     transformations_6D = transforms.Compose([transforms.Resize(224),
                                       transforms.CenterCrop(224),
                                       transforms.ToTensor(),
@@ -114,7 +171,7 @@ def detect(save_img=False):
                        pretrained=False)
 
     saved_state_dict = torch.load(os.path.join(
-        snapshot_path_6D), map_location='cpu')
+        snapshot_path_6D), map_location=device)
 
     if 'model_state_dict' in saved_state_dict:
         model_6DRepNet.load_state_dict(saved_state_dict['model_state_dict'])
@@ -126,6 +183,11 @@ def detect(save_img=False):
     model_6DRepNet.eval()  # Change model to 'eval' mode (BN uses moving mean/var).
 
     # End 6D_Repnet
+
+    # # elg_model
+    elg_path = '../weights/GazeML/v0.2/model-v0.2-(36, 60)-epoch-89-loss-0.7151.pth'
+    elg_model = torch.load(elg_path,map_location=device).to(device)
+    elg_model.eval()
 
     # landmark
     model_landmark = '../weights/landmark-model/shape_predictor_5_face_landmarks.dat'
@@ -156,8 +218,9 @@ def detect(save_img=False):
     #------ put txt ------
     base_txt_height = 35 + eye_h_roi
     gap_txt_height = 35
-    #------ gaze flag ------
-    gaze_model_flag = 0
+    #------ boundary ------
+    yaw_boundary = 30.0
+    pitch_boundary = 30.0
 
     t0 = time.time()
 
@@ -223,6 +286,9 @@ def detect(save_img=False):
                 pupil_right = []
                 mouse_roi = []
                 pupil = []
+                #------ gaze flag ------
+                gaze_model_flag = 0
+                headpose_flag = 1
 
                 driver_face_local = []
                 # find driver face
@@ -235,6 +301,7 @@ def detect(save_img=False):
                             driver_face_local = bb
 
                 if len(driver_face_local) == 0:
+                    headpose_flag = 0
                     break
 
                 # find all boundary of face     
@@ -310,98 +377,113 @@ def detect(save_img=False):
                 # End 6DRepNet
 
                 # pupil left
-                flag_list = [1,1,1,1,1,1,1]
-
-                if abs(y_pred_deg[0].item()) < 30.0:
+                if abs(y_pred_deg[0].item()) < yaw_boundary and abs(p_pred_deg[0].item()) < pitch_boundary:
                     rect = dlib.rectangle(driver_face_local[0],driver_face_local[1],driver_face_local[2],driver_face_local[3])
                     shape = predictor(im0, rect)
                     shape = face_utils.shape_to_np(shape)
+                    gray = cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY)
+                    # 0-1:Right to Left in Right Eye.
+                    # 2-3:Left to Right in Left Eye.
                     gaze_model_flag = 1
                 else:
                     gaze_model_flag = 0
                     
                 # ellipse fit left pupil and gaze estimate
-                if len(pupil_left) > 0 and gaze_model_flag == 1:
-                    # facelandmark
+                if gaze_model_flag == 1:
+                    # ------ eye regoin ------
                     if len(eye_left) > 0:
                         # left eye left
-                        if shape[0][0] > eye_left[0] and shape[0][0] < eye_left[2] and shape[0][1] > eye_left[1] \
-                        and shape[0][1] < eye_left[3]:
-                            eye_left_loc_l = (shape[0][0], shape[0][1])
-                        else:
-                            eye_left_loc_l = (int(eye_left[0]),int((eye_left[3]+eye_left[1])/2))
+                        if not (shape[0][0] > eye_left[0] and shape[0][0] < eye_left[2] and shape[0][1] > eye_left[1] \
+                        and shape[0][1] < eye_left[3]):
+                            shape[0] = (int(eye_left[0]),int((eye_left[3]+eye_left[1])/2))
+
                         # left eye right
-                        if shape[1][0] > eye_left[0] and shape[1][0] < eye_left[2] and shape[1][1] > eye_left[1] \
-                        and shape[1][1] < eye_left[3]:
-                            eye_left_loc_r = (shape[1][0], shape[1][1])
-                        else:
-                            eye_left_loc_r = (int(eye_left[2]),int((eye_left[3]+eye_left[1])/2))
-                    else :
-                        eye_left_loc_l = (shape[0][0], shape[0][1])
-                        eye_left_loc_r = (shape[1][0], shape[1][1])
+                        if not (shape[1][0] > eye_left[0] and shape[1][0] < eye_left[2] and shape[1][1] > eye_left[1] \
+                        and shape[1][1] < eye_left[3]):
+                            shape[1] = (int(eye_left[2]),int((eye_left[3]+eye_left[1])/2))
 
-                    #draw eye points
-                    cv2.circle(im0, eye_left_loc_l, 2, (0, 0, 255), -1)
-                    cv2.circle(im0, eye_left_loc_r, 2, (0, 0, 255), -1)
-
-                    # define eye loc/center/length
-                    left_eye_center = ((eye_left_loc_l[0] + eye_left_loc_r[0])/2,(eye_left_loc_l[1] + eye_left_loc_r[1])/2)
-                    left_eye_length = eye_left_loc_r[0] - eye_left_loc_l[0]
-                    pupil_left_center = (int((pupil_left[0]+pupil_left[2])/2),int((pupil_left[1]+pupil_left[3])/2))
-                    
-                    # define pupil imformation
-                    radius_left = (int(pupil_left[2]-pupil_left[0]),int(pupil_left[3]-pupil_left[1]))
-                    left_iris_ldmks = find_yolo_ellipse_point(num_iris_landmark,pupil_left_center,radius_left)
-                    im0 = draw_yolo_ellipse_point(im0,left_iris_ldmks,pupil_left_center)
-                    left_gaze = GM.estimate_gaze_from_landmarks(left_iris_ldmks, pupil_left_center, left_eye_center, left_eye_length)
-
-                    left_gaze = left_gaze.reshape(1, 2)
-                    left_gaze[0][1] = -left_gaze[0][1]
-                    im0 = gaze_util.draw_gaze(im0,pupil_left_center,left_gaze[0])
-
-                # ellipse fit right pupil and gaze estimate
-                if len(pupil_right) > 0 and gaze_model_flag == 1:
-                    # facelandmark
                     if len(eye_right) > 0:
                         # right eye right
-                        if shape[0][0] > eye_right[0] and shape[0][0] < eye_right[2] and shape[0][1] > eye_right[1] \
-                        and shape[0][1] < eye_right[3]:
-                            eye_right_loc_l = (shape[0][0], shape[0][1])
-                        else:
-                            eye_right_loc_l = (int(eye_right[0]),int((eye_right[3]+eye_right[1])/2))
+                        if not (shape[0][0] > eye_right[0] and shape[0][0] < eye_right[2] and shape[0][1] > eye_right[1] \
+                        and shape[0][1] < eye_right[3]):
+                            shape[0] = (int(eye_right[0]),int((eye_right[3]+eye_right[1])/2))
+
                         # right eye right
-                        if shape[1][0] > eye_right[0] and shape[1][0] < eye_right[2] and shape[1][1] > eye_right[1] \
-                        and shape[1][1] < eye_right[3]:
-                            eye_right_loc_r = (shape[1][0], shape[1][1])
-                        else:
-                            eye_right_loc_r = (int(eye_right[2]),int((eye_right[3]+eye_right[1])/2))
-                    else :
-                        eye_right_loc_l = (shape[0][0], shape[0][1])
-                        eye_right_loc_r = (shape[1][0], shape[1][1])
+                        if not (shape[1][0] > eye_right[0] and shape[1][0] < eye_right[2] and shape[1][1] > eye_right[1] \
+                        and shape[1][1] < eye_right[3]):
+                            shape[1] = (int(eye_right[2]),int((eye_right[3]+eye_right[1])/2))
+
+                    eye_region_landmarks = shape[0:4]
+                    left_eye, right_eye = clip_eye_region(eye_region_landmarks, gray)
                     
-                    #draw eye points
-                    cv2.circle(im0, eye_right_loc_l, 2, (0, 0, 255), -1)
-                    cv2.circle(im0, eye_right_loc_r, 2, (0, 0, 255), -1)
-                    # define eye loc/center/length
-                    right_eye_center = ((eye_right_loc_l[0] + eye_right_loc_r[0])/2,(eye_right_loc_l[1] + eye_right_loc_r[1])/2)
-                    right_eye_length = eye_right_loc_r[0] - eye_right_loc_l[0]
-                    pupil_right_center = (int((pupil_right[0]+pupil_right[2])/2),int((pupil_right[1]+pupil_right[3])/2))
-                    # define pupil imformation
-                    radius_right = (int(pupil_right[2]-pupil_right[0]),int(pupil_right[3]-pupil_right[1]))
-                    right_iris_ldmks = find_yolo_ellipse_point(num_iris_landmark,pupil_right_center,radius_right)
-                    im0 = draw_yolo_ellipse_point(im0,right_iris_ldmks,pupil_right_center)
-                    right_gaze = GM.estimate_gaze_from_landmarks(right_iris_ldmks, pupil_right_center, right_eye_center, right_eye_length)
-                
-                    right_gaze = right_gaze.reshape(1, 2)
-                    right_gaze[0][1] = -right_gaze[0][1]
-                    im0 = gaze_util.draw_gaze(im0,pupil_right_center,right_gaze[0])
+                    for (j, (x, y)) in enumerate(shape):
+                        if j in range(0, 4):
+                            cv2.circle(im0, (x, y), 2, (0, 255, 0), -1)
 
+                    # ------ pupil left ------
+                    if len(pupil_left) > 0:
+                        # define eye loc/center/length
+                        left_eye_center = ((shape[0][0] + shape[1][0])/2,(shape[0][1] + shape[1][1])/2)
+                        left_eye_length = shape[1][0] - shape[0][0]
+                        pupil_left_center = (int((pupil_left[0]+pupil_left[2])/2),int((pupil_left[1]+pupil_left[3])/2))
+                        
+                        # define pupil imformation
+                        radius_left = (int(pupil_left[2]-pupil_left[0]),int(pupil_left[3]-pupil_left[1]))
+                        left_iris_ldmks = find_yolo_ellipse_point(num_iris_landmark,pupil_left_center,radius_left)
+                        im0 = draw_yolo_ellipse_point(im0,left_iris_ldmks,pupil_left_center)
+                        left_gaze = GM.estimate_gaze_from_landmarks(left_iris_ldmks, pupil_left_center, left_eye_center, left_eye_length)
 
-                # # headpose + gaze
-                # if eye_gaze != []:
-                #     eye_gaze = np.mean(eye_gaze, axis=0)
-                #     y_pred_deg += 
-                #     R_headpose = utils_with_6D.get_R(r_pred_deg,y_pred_deg,p_pred_deg)
+                        left_gaze = left_gaze.reshape(1, 2)
+                        left_gaze[0][1] = -left_gaze[0][1]
+
+                        # add headpose
+                        left_gaze[0][0] += p_pred_deg
+                        left_gaze[0][1] += y_pred_deg
+                        utils_with_6D.draw_gaze_6D(pupil_left_center,im0,left_gaze[0][1],left_gaze[0][0],color=(255,0,0))
+
+                    else:
+                        gaze_model_flag = 0
+                        # # As this elg_model only train for right eyes, so need to do flip for left eyes before estimate.
+                        # left_gaze, left_iris_center = estimate_gaze(
+                        #     cv2.flip(left_eye[0], 1), 
+                        #     transform_mat=left_eye[1],
+                        #     model=elg_model,
+                        #     is_left=True
+                        # )
+                        # im0 = gaze_util.draw_gaze(im0, left_iris_center, left_gaze[0])
+
+                    # ------ pupil right ------
+
+                    if len(pupil_right) > 0:
+                        # define eye loc/center/length
+                        right_eye_center = ((shape[0][0] + shape[1][0])/2,(shape[0][1] + shape[1][1])/2)
+                        right_eye_length = shape[1][0] - shape[0][0]
+                        pupil_right_center = (int((pupil_right[0]+pupil_right[2])/2),int((pupil_right[1]+pupil_right[3])/2))
+                        
+                        # define pupil imformation
+                        radius_right = (int(pupil_right[2]-pupil_right[0]),int(pupil_right[3]-pupil_right[1]))
+                        right_iris_ldmks = find_yolo_ellipse_point(num_iris_landmark,pupil_right_center,radius_right)
+                        im0 = draw_yolo_ellipse_point(im0,right_iris_ldmks,pupil_right_center)
+                        right_gaze = GM.estimate_gaze_from_landmarks(right_iris_ldmks, pupil_right_center, right_eye_center, right_eye_length)
+
+                        right_gaze = right_gaze.reshape(1, 2)
+                        right_gaze[0][1] = -right_gaze[0][1]
+
+                        # add headpose
+                        right_gaze[0][0] += p_pred_deg
+                        right_gaze[0][1] += y_pred_deg
+                        utils_with_6D.draw_gaze_6D(pupil_right_center,im0,right_gaze[0][1],right_gaze[0][0],color=(255,0,0))
+
+                    else:
+                        gaze_model_flag = 0
+                        # # As this elg_model only train for right eyes, so need to do flip for right eyes before estimate.
+                        # right_gaze, right_iris_center = estimate_gaze(
+                        #     cv2.flip(right_eye[0], 1), 
+                        #     transform_mat=right_eye[1],
+                        #     model=elg_model,
+                        #     is_left=False
+                        # )
+                        # im0 = gaze_util.draw_gaze(im0, right_iris_center, right_gaze[0])
 
                 # update eye image
                 if len(eye_left) > 0:
@@ -414,9 +496,8 @@ def detect(save_img=False):
                     right_eye_img = cv2.resize(right_eye_img,(eye_w_roi,eye_h_roi))
 
                 # put eye image on left top
-                im0[0:eye_h_roi,0:eye_w_roi,:] = left_eye_img
-                im0[0:eye_h_roi,eye_w_roi:2*eye_w_roi,:]  = right_eye_img
-                # im0[eye_h_roi:2*eye_h_roi,0:eye_w_roi,:] = rotation_left_eye_img
+                # im0[0:eye_h_roi,0:eye_w_roi,:] = left_eye_img
+                # im0[0:eye_h_roi,eye_w_roi:2*eye_w_roi,:]  = right_eye_img
                 
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
@@ -436,23 +517,50 @@ def detect(save_img=False):
             print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
 
             if show_text:
-                pitch_str = str(round(p_pred_deg[0].item(), 3))
-                yaw_str = str(-(round(y_pred_deg[0].item(), 3)))
-                roll_str = str(round(r_pred_deg[0].item(), 3))
-                #(img, text, org, fontFace, fontScale, color, thickness, lineType)
-                next_txt_height = base_txt_height
-                cv2.putText(im0,"HEAD-POSE",(0,next_txt_height), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                next_txt_height += gap_txt_height
-                cv2.putText(im0,"roll:"+roll_str,(0,next_txt_height), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
-                next_txt_height += gap_txt_height
-                cv2.putText(im0,"yaw:"+yaw_str,(0,next_txt_height), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                next_txt_height += gap_txt_height
-                cv2.putText(im0,"pitch:"+pitch_str,(0,next_txt_height), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                
+                if headpose_flag == 1:
+                    head_pitch_str = str(round(p_pred_deg[0].item(), 3))
+                    head_yaw_str = str(-(round(y_pred_deg[0].item(), 3)))
+                    head_roll_str = str(round(r_pred_deg[0].item(), 3))
+
+                    #(img, text, org, fontFace, fontScale, color, thickness, lineType)
+                    next_txt_height = base_txt_height
+                    cv2.putText(im0,"HEAD-POSE",(0,next_txt_height), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    next_txt_height += gap_txt_height
+                    cv2.putText(im0,"roll:"+head_roll_str,(0,next_txt_height), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+                    next_txt_height += gap_txt_height
+                    cv2.putText(im0,"yaw:"+head_yaw_str,(0,next_txt_height), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    next_txt_height += gap_txt_height
+                    cv2.putText(im0,"pitch:"+head_pitch_str,(0,next_txt_height), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    next_txt_height += gap_txt_height
+
+                if gaze_model_flag == 1:
+                    eye_left_pitch_str = str(round(left_gaze[0][0], 3))
+                    eye_left_yaw_str = str(round(left_gaze[0][1], 3))
+                    eye_right_pitch_str = str(round(right_gaze[0][0], 3))
+                    eye_right_yaw_str = str(round(right_gaze[0][1], 3))
+                    cv2.putText(im0,"LEFT EYE GAZE",(0,next_txt_height), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    next_txt_height += gap_txt_height
+                    cv2.putText(im0,"yaw:"+eye_left_yaw_str,(0,next_txt_height), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    next_txt_height += gap_txt_height
+                    cv2.putText(im0,"pitch:"+eye_left_pitch_str,(0,next_txt_height), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    next_txt_height += gap_txt_height
+                    cv2.putText(im0,"RIGHT EYE GAZE",(0,next_txt_height), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    next_txt_height += gap_txt_height
+                    cv2.putText(im0,"yaw:"+eye_right_yaw_str,(0,next_txt_height), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    next_txt_height += gap_txt_height
+                    cv2.putText(im0,"pitch:"+eye_right_pitch_str,(0,next_txt_height), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+
             # Stream results
             if view_img:
                 # if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_AUTOSIZE) < 0:

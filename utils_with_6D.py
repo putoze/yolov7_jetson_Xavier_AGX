@@ -234,7 +234,7 @@ def get_R(x,y,z):
     
 #     return image_out    
 
-def draw_gaze_6D(nose_pos,image_in, yaw, pitch, length=200, thickness=2, color=(255, 255, 0),sclae=2.0):
+def draw_gaze_6D(nose_pos,image_in, yaw, pitch, length=200.0, thickness=2, color=(255, 255, 0),sclae=2.0):
     """Draw gaze angle on given image with a given eye positions."""
     image_out = image_in
 

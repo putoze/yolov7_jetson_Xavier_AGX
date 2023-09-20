@@ -121,6 +121,8 @@ echo [10]: otocam  detect + 6D headpose + gazeml
 echo ----------------
 echo [11]: video  detect + 6D headpose + gazeml
 echo ----------------
+echo [12]: otocam  detect + 6D headpose + gazeml + elg
+echo ----------------
 echo -n "Press enter to start it:"
 
 read MY_mode
@@ -152,7 +154,7 @@ if [ $MY_mode -eq 1 ] ; then
     --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output30.avi \
+    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output31.avi \
     --no-trace
     # --source /media/joe/Xavierssd/20230816_window_video/20230318205957.mp4
 
@@ -326,6 +328,22 @@ if [ $MY_mode -eq 11 ] ; then
     --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output29.avi \
     --no-trace
 
+fi
+
+#============================================================================ 
+
+if [ $MY_mode -eq 12 ] ; then
+    echo ============
+    echo 「otocam  detect_with_6D_gazeml_elg」
+    echo ============
+
+    python detect_with_6D_gazeml_elg.py \
+    --weight ../weights/torch_yolov7_weight/$Weights \
+    --conf 0.5 \
+    --img-size 640 \
+    --source cam.txt \
+    --no-trace 
+    
 fi
 
 
