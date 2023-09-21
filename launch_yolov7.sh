@@ -36,8 +36,6 @@ fi
 
 echo ""
 echo "Hello, choose the weight you want it~"
-echo [0]: yolov7-tiny-20230831-five-direct-1100epoch.pt
-echo ----------------
 echo [1]: yolov7-tiny-20230812-11class-894epoch.pt
 echo ----------------
 echo [2]: yolov7-w6-pose.pt
@@ -48,11 +46,9 @@ echo [4]: yolov8-lite-s.onnx
 echo ----------------
 echo [5]: yolov7-tiny-20230831-five-direct-2200epoch.pt
 echo ----------------
-echo [6]: yolov7-tiny-9cs-70cm-20230916-600epoch.pt
+echo [6]: yolov7-tiny-20230920-9cs-50-70cm-600epoch.pt
 echo ----------------
-echo [7]: yolov7-tiny-5cs-50cm-20230916-600epoch.pt
-echo ----------------
-echo [8]: yolov7-tiny-9cs-20230916-50_70cm-600epoch.pt
+echo [7]: yolov7-tiny-9cs-20230920-600epoch.pt
 echo ----------------
 echo [n]: None
 echo -n "Press enter to start it:"
@@ -60,9 +56,7 @@ echo -n "Press enter to start it:"
 
 read MY_Weights
 
-if [ $MY_Weights -eq 0 ] ; then
-    Weights='yolov7-tiny-20230831-five-direct-1100epoch.pt'
-fi 
+
 if [ $MY_Weights -eq 1 ] ; then
     Weights='yolov7-tiny-20230812-11class-894epoch.pt'
 fi 
@@ -79,15 +73,11 @@ if [ $MY_Weights -eq 5 ] ; then
     Weights='yolov7-tiny-20230831-five-direct-2200epoch.pt'
 fi 
 if [ $MY_Weights -eq 6 ] ; then
-    Weights='yolov7-tiny-9cs-70cm-20230916-600epoch.pt'
+    Weights='yolov7-tiny-20230920-9cs-50-70cm-600epoch.pt'
 fi
 if [ $MY_Weights -eq 7 ] ; then
-    Weights='yolov7-tiny-5cs-50cm-20230916-600epoch.pt'
+    Weights='yolov7-tiny-9cs-20230920-600epoch.pt'
 fi
-if [ $MY_Weights -eq 8 ] ; then
-    Weights='yolov7-tiny-9cs-20230916-50_70cm-600epoch.pt'
-fi
-
 
 echo $Weights
 
@@ -325,7 +315,7 @@ if [ $MY_mode -eq 11 ] ; then
     --weight ../weights/torch_yolov7_weight/$Weights \
     --conf 0.5 \
     --img-size 640 \
-    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output29.avi \
+    --source /media/joe/Xavierssd/2023_0816_otocam_datavideo/output31.avi \
     --no-trace
 
 fi

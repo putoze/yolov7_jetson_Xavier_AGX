@@ -191,6 +191,7 @@ def detect(save_img=False):
 
     # landmark
     model_landmark = '../weights/landmark-model/shape_predictor_5_face_landmarks.dat'
+    dlib.DLIB_USE_CUDA = True
     predictor = dlib.shape_predictor(model_landmark)
 
     # Self-define global parameter

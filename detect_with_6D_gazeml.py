@@ -191,6 +191,7 @@ def detect(save_img=False):
 
     # landmark
     model_landmark = '../weights/landmark-model/shape_predictor_5_face_landmarks.dat'
+    dlib.DLIB_USE_CUDA = True
     predictor = dlib.shape_predictor(model_landmark)
 
     # Self-define global parameter
@@ -269,6 +270,11 @@ def detect(save_img=False):
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
 
             start = time.time()
+
+            #------ gaze flag ------
+            gaze_model_flag = 0
+            headpose_flag = 0
+
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -286,9 +292,6 @@ def detect(save_img=False):
                 pupil_right = []
                 mouse_roi = []
                 pupil = []
-                #------ gaze flag ------
-                gaze_model_flag = 0
-                headpose_flag = 1
 
                 driver_face_local = []
                 # find driver face
@@ -303,6 +306,8 @@ def detect(save_img=False):
                 if len(driver_face_local) == 0:
                     headpose_flag = 0
                     break
+                else:
+                    headpose_flag = 1
 
                 # find all boundary of face     
                 for *xyxy, conf, cls in reversed(det):
@@ -318,7 +323,7 @@ def detect(save_img=False):
                                 eye_right = bb
                         if names[int(cls)] == 'pupil' and bb[3] < nose_center_point[1]:
                             pupil.append(bb)
-                        if names[int(cls)] == 'nose' :
+                        if names[int(cls)] == 'nose':
                             nose_center_point = center
                         if names[int(cls)] == 'mouse':
                             mouse_roi = bb
@@ -379,53 +384,46 @@ def detect(save_img=False):
                 # pupil left
                 if abs(y_pred_deg[0].item()) < yaw_boundary and abs(p_pred_deg[0].item()) < pitch_boundary:
                     rect = dlib.rectangle(driver_face_local[0],driver_face_local[1],driver_face_local[2],driver_face_local[3])
-                    shape = predictor(im0, rect)
-                    shape = face_utils.shape_to_np(shape)
                     gray = cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY)
+                    shape = predictor(gray, rect)
+                    shape = face_utils.shape_to_np(shape)
                     # 0-1:Right to Left in Right Eye.
                     # 2-3:Left to Right in Left Eye.
                     gaze_model_flag = 1
+
                 else:
                     gaze_model_flag = 0
                     
                 # ellipse fit left pupil and gaze estimate
                 if gaze_model_flag == 1:
-                    # ------ eye regoin ------
-                    if len(eye_left) > 0:
-                        # left eye left
-                        if not (shape[0][0] > eye_left[0] and shape[0][0] < eye_left[2] and shape[0][1] > eye_left[1] \
-                        and shape[0][1] < eye_left[3]):
-                            shape[0] = (int(eye_left[0]),int((eye_left[3]+eye_left[1])/2))
-
-                        # left eye right
-                        if not (shape[1][0] > eye_left[0] and shape[1][0] < eye_left[2] and shape[1][1] > eye_left[1] \
-                        and shape[1][1] < eye_left[3]):
-                            shape[1] = (int(eye_left[2]),int((eye_left[3]+eye_left[1])/2))
-
-                    if len(eye_right) > 0:
-                        # right eye right
-                        if not (shape[0][0] > eye_right[0] and shape[0][0] < eye_right[2] and shape[0][1] > eye_right[1] \
-                        and shape[0][1] < eye_right[3]):
-                            shape[0] = (int(eye_right[0]),int((eye_right[3]+eye_right[1])/2))
-
-                        # right eye right
-                        if not (shape[1][0] > eye_right[0] and shape[1][0] < eye_right[2] and shape[1][1] > eye_right[1] \
-                        and shape[1][1] < eye_right[3]):
-                            shape[1] = (int(eye_right[2]),int((eye_right[3]+eye_right[1])/2))
-
-                    eye_region_landmarks = shape[0:4]
-                    left_eye, right_eye = clip_eye_region(eye_region_landmarks, gray)
-                    
-                    for (j, (x, y)) in enumerate(shape):
-                        if j in range(0, 4):
-                            cv2.circle(im0, (x, y), 2, (0, 255, 0), -1)
-
                     # ------ pupil left ------
                     if len(pupil_left) > 0:
+                        # pupil center
+                        pupil_left_center = (int((pupil_left[0]+pupil_left[2])/2),int((pupil_left[1]+pupil_left[3])/2))
+                        # ------ eye regoin ------
+                        if len(eye_left) > 0:
+                            # left eye left
+                            if not (shape[0][0] > eye_left[0] and shape[0][0] < pupil_left[0] and shape[0][1] > eye_left[1] \
+                            and shape[0][1] < eye_left[3]):
+                                shape[0] = (int(eye_left[0]),int((eye_left[3]+eye_left[1])/2))
+
+                            # left eye right
+                            if not (shape[1][0] > pupil_left[2] and shape[1][0] < eye_left[2] and shape[1][1] > eye_left[1] \
+                            and shape[1][1] < eye_left[3]):
+                                shape[1] = (int(eye_left[2]),int((eye_left[3]+eye_left[1])/2))
+                        else:
+                            utils_with_6D.draw_gaze_6D(pupil_left_center,im0,y_pred_deg,p_pred_deg,color=(255,0,0))
+                            gaze_model_flag = 0
+                            break
+
+                        # draw corner of eye
+                        for (j, (x, y)) in enumerate(shape):
+                            if j in range(0, 2):
+                                cv2.circle(im0, (x, y), 2, (255, 255, 255), -1)
+
                         # define eye loc/center/length
                         left_eye_center = ((shape[0][0] + shape[1][0])/2,(shape[0][1] + shape[1][1])/2)
                         left_eye_length = shape[1][0] - shape[0][0]
-                        pupil_left_center = (int((pupil_left[0]+pupil_left[2])/2),int((pupil_left[1]+pupil_left[3])/2))
                         
                         # define pupil imformation
                         radius_left = (int(pupil_left[2]-pupil_left[0]),int(pupil_left[3]-pupil_left[1]))
@@ -434,11 +432,11 @@ def detect(save_img=False):
                         left_gaze = GM.estimate_gaze_from_landmarks(left_iris_ldmks, pupil_left_center, left_eye_center, left_eye_length)
 
                         left_gaze = left_gaze.reshape(1, 2)
-                        left_gaze[0][1] = -left_gaze[0][1]
+                        # left_gaze[0][1] = -left_gaze[0][1]
 
                         # add headpose
-                        left_gaze[0][0] += p_pred_deg
-                        left_gaze[0][1] += y_pred_deg
+                        left_gaze[0][0] = left_gaze[0][0]*180/np.pi + p_pred_deg
+                        left_gaze[0][1] = left_gaze[0][1]*180/np.pi + y_pred_deg
                         utils_with_6D.draw_gaze_6D(pupil_left_center,im0,left_gaze[0][1],left_gaze[0][0],color=(255,0,0))
 
                     else:
@@ -455,10 +453,32 @@ def detect(save_img=False):
                     # ------ pupil right ------
 
                     if len(pupil_right) > 0:
-                        # define eye loc/center/length
-                        right_eye_center = ((shape[0][0] + shape[1][0])/2,(shape[0][1] + shape[1][1])/2)
-                        right_eye_length = shape[1][0] - shape[0][0]
+                        # pupil center
                         pupil_right_center = (int((pupil_right[0]+pupil_right[2])/2),int((pupil_right[1]+pupil_right[3])/2))
+                        # ------ eye regoin ------
+                        if len(eye_right) > 0:
+                            # right eye right
+                            if not (shape[2][0] > eye_right[0] and shape[2][0] < pupil_right[0] and shape[2][1] > eye_right[1] \
+                            and shape[2][1] < eye_right[3]):
+                                shape[2] = (int(eye_right[0]),int((eye_right[3]+eye_right[1])/2))
+
+                            # right eye right
+                            if not (shape[3][0] > pupil_right[2] and shape[3][0] < eye_right[2] and shape[3][1] > eye_right[1] \
+                            and shape[3][1] < eye_right[3]):
+                                shape[3] = (int(eye_right[2]),int((eye_right[3]+eye_right[1])/2))
+                        else:
+                            utils_with_6D.draw_gaze_6D(pupil_right_center,im0,y_pred_deg,p_pred_deg,color=(255,0,0))
+                            gaze_model_flag = 0
+                            break
+
+                        # draw corner of eye
+                        for (j, (x, y)) in enumerate(shape):
+                            if j in range(2, 4):
+                                cv2.circle(im0, (x, y), 2, (255, 255, 255), -1)
+
+                        # define eye loc/length
+                        right_eye_center = ((shape[2][0] + shape[3][0])/2,(shape[2][1] + shape[3][1])/2)
+                        right_eye_length = shape[3][0] - shape[2][0]
                         
                         # define pupil imformation
                         radius_right = (int(pupil_right[2]-pupil_right[0]),int(pupil_right[3]-pupil_right[1]))
@@ -467,11 +487,11 @@ def detect(save_img=False):
                         right_gaze = GM.estimate_gaze_from_landmarks(right_iris_ldmks, pupil_right_center, right_eye_center, right_eye_length)
 
                         right_gaze = right_gaze.reshape(1, 2)
-                        right_gaze[0][1] = -right_gaze[0][1]
+                        # right_gaze[0][1] = -right_gaze[0][1]
 
                         # add headpose
-                        right_gaze[0][0] += p_pred_deg
-                        right_gaze[0][1] += y_pred_deg
+                        right_gaze[0][0] = right_gaze[0][0]*180/np.pi + p_pred_deg
+                        right_gaze[0][1] = right_gaze[0][1]*180/np.pi + y_pred_deg
                         utils_with_6D.draw_gaze_6D(pupil_right_center,im0,right_gaze[0][1],right_gaze[0][0],color=(255,0,0))
 
                     else:
