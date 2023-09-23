@@ -36,6 +36,7 @@ from process_alg.fitEllipse import *
 from utils_ten.display import open_window, show_fps, set_display
 import src.models.gaze_modelbased as GM
 import src.utils.gaze as gaze_util
+from process_alg.drowsiness_yawn import *
 
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
@@ -46,63 +47,6 @@ from utils.torch_utils import select_device, load_classifier, time_synchronized,
 
 # Self add
 WINDOW_NAME = 'Yolov7-Tiny Demo'
-
-def clip_eye_region(eye_region_landmarks, image):
-    # Output size.
-    oh, ow = 36, 60
-
-    def process_coords(coords_list):
-        return np.array([(x, y) for (x, y) in coords_list])
-
-    def process_rescale_clip(eye_landmarks):
-        eye_width = 1.5 * abs(eye_landmarks[0][0] - eye_landmarks[1][0])
-        eye_middle = (eye_landmarks[0] + eye_landmarks[1]) / 2
-
-        recentre_mat = np.asmatrix(np.eye(3))
-        recentre_mat[0, 2] = -eye_middle[0] + 0.5 * eye_width
-        recentre_mat[1, 2] = -eye_middle[1] + 0.5 * oh / ow * eye_width
-
-        scale_mat = np.asmatrix(np.eye(3))
-        np.fill_diagonal(scale_mat, ow / eye_width)
-
-        transform_mat = recentre_mat * scale_mat
-
-        eye = cv2.warpAffine(image, transform_mat[:2, :3], (ow, oh))
-        eye = cv2.equalizeHist(eye)
-        eye = eye.astype(np.float32)
-        eye *= 2.0 / 255.0
-        eye -= 1.0
-        return eye, np.asarray(transform_mat)
-
-    left_eye_landmarks = process_coords(eye_region_landmarks[2:4])
-    right_eye_landmarks = process_coords(eye_region_landmarks[0:2])
-    left_eye_image, left_transform_mat = process_rescale_clip(left_eye_landmarks)
-    right_eye_image, right_transform_mat = process_rescale_clip(right_eye_landmarks)
-    
-    return [left_eye_image, left_transform_mat], [right_eye_image, right_transform_mat]
-
-def estimate_gaze(eye_image, transform_mat, model, is_left: bool):
-    eye_image = np.expand_dims(eye_image, -1)
-    # Change format to NCHW.
-    eye_image = np.transpose(eye_image, (2, 0, 1))
-    eye_image = torch.unsqueeze(torch.Tensor(eye_image), dim=0)
-    eye_input = eye_image.cuda()
-    # Do predict by elg_model.
-    heatmaps_predict, ldmks_predict, radius_predict = model(eye_input)
-    # Get parameters for model_based gaze estimator.
-    ldmks = ldmks_predict.cpu().detach().numpy()
-    iris_ldmks = np.array(ldmks[0][0:8])
-    iris_center = np.array(ldmks[0][-2])
-    eyeball_center = np.array(ldmks[0][-1])
-    eyeball_radius = radius_predict.cpu().detach().numpy()[0]
-    # Predict gaze.
-    gaze_predict = GM.estimate_gaze_from_landmarks(iris_ldmks, iris_center, eyeball_center, eyeball_radius)
-    predict = gaze_predict.reshape(1, 2)
-    iris_center = ldmks_predict[0].cpu().detach().numpy()[16]
-    if is_left:
-        iris_center[0] = 60 - iris_center[0]
-    iris_center = (iris_center - [transform_mat[0][2], transform_mat[1][2]]) / transform_mat[0][0]
-    return predict, iris_center
 
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
@@ -190,7 +134,7 @@ def detect(save_img=False):
     elg_model.eval()
 
     # landmark
-    model_landmark = '../weights/landmark-model/shape_predictor_5_face_landmarks.dat'
+    model_landmark = '../weights/landmark-model/shape_predictor_68_face_landmarks_GTX.dat'
     dlib.DLIB_USE_CUDA = True
     predictor = dlib.shape_predictor(model_landmark)
 
@@ -222,6 +166,14 @@ def detect(save_img=False):
     #------ boundary ------
     yaw_boundary = 30.0
     pitch_boundary = 30.0
+    #------ landmark Alert ------
+    EYE_AR_THRESH = 0.3
+    EYE_AR_CONSEC_FRAMES = 30
+    YAWN_THRESH = 20
+    alarm_status = False
+    alarm_status2 = False
+    saying = False
+    COUNTER = 0
 
     t0 = time.time()
 
@@ -302,6 +254,7 @@ def detect(save_img=False):
                         if(face_area > face_max) :
                             face_max = face_area
                             driver_face_local = bb
+                            driver_label = f'{names[int(cls)]} {conf:.2f}'
 
                 if len(driver_face_local) == 0:
                     headpose_flag = 0
@@ -385,14 +338,68 @@ def detect(save_img=False):
                 if abs(y_pred_deg[0].item()) < yaw_boundary and abs(p_pred_deg[0].item()) < pitch_boundary:
                     rect = dlib.rectangle(driver_face_local[0],driver_face_local[1],driver_face_local[2],driver_face_local[3])
                     gray = cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY)
-                    shape = predictor(gray, rect)
-                    shape = face_utils.shape_to_np(shape)
+                    shape_68 = predictor(gray, rect)
+                    shape_68 = face_utils.shape_to_np(shape_68)
+                    # im0 = face_utils.visualize_facial_landmarks(im0, shape_68)
+                    shape = [shape_68[36],shape_68[39],shape_68[42],shape_68[45]]
+
                     # 0-1:Right to Left in Right Eye.
                     # 2-3:Left to Right in Left Eye.
                     gaze_model_flag = 1
 
                 else:
                     gaze_model_flag = 0
+
+                # Alert
+                eye = final_ear(shape_68)
+                ear = eye[0]
+                leftEye = eye [1]
+                rightEye = eye[2]
+
+                distance = lip_distance(shape_68)
+
+                leftEyeHull = cv2.convexHull(leftEye)
+                rightEyeHull = cv2.convexHull(rightEye)
+                cv2.drawContours(im0, [leftEyeHull], -1, (0, 255, 0), 1)
+                cv2.drawContours(im0, [rightEyeHull], -1, (0, 255, 0), 1)
+
+                lip = shape_68[48:60]
+                cv2.drawContours(im0, [lip], -1, (0, 255, 0), 1)
+
+                if ear < EYE_AR_THRESH:
+                    COUNTER += 1
+
+                    if COUNTER >= EYE_AR_CONSEC_FRAMES:
+                        if alarm_status == False:
+                            alarm_status = True
+                            t = Thread(target=alarm, args=('wake up sir',))
+                            t.deamon = True
+                            t.start()
+
+                        cv2.putText(im0, "DROWSINESS ALERT!", (10, 30),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+                else:
+                    COUNTER = 0
+                    alarm_status = False
+
+                if (distance > YAWN_THRESH):
+                        cv2.putText(im0, "Yawn Alert", (10, 30),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        if alarm_status2 == False and saying == False:
+                            alarm_status2 = True
+                            t = Thread(target=alarm, args=('take some fresh air sir',))
+                            t.deamon = True
+                            t.start()
+                else:
+                    alarm_status2 = False
+
+                cv2.putText(im0, "EAR: {:.2f}".format(ear), (300, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                cv2.putText(im0, "YAWN: {:.2f}".format(distance), (300, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            
+                # ------ End Alert ------
                     
                 # ellipse fit left pupil and gaze estimate
                 if gaze_model_flag == 1:
@@ -514,6 +521,8 @@ def detect(save_img=False):
                     # print("eye_right",eye_right)
                     right_eye_img = im0[eye_right[1]:eye_right[3],eye_right[0]:eye_right[2],:]
                     right_eye_img = cv2.resize(right_eye_img,(eye_w_roi,eye_h_roi))
+                
+
 
                 # put eye image on left top
                 # im0[0:eye_h_roi,0:eye_w_roi,:] = left_eye_img
@@ -527,10 +536,13 @@ def detect(save_img=False):
                         with open(txt_path + '.txt', 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
-                    if save_img or view_img:  # Add bbox to image
-                        label = f'{names[int(cls)]} {conf:.2f}'
-                        # print(label)
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
+                    # if save_img or view_img:  # Add bbox to image
+                    #     label = f'{names[int(cls)]} {conf:.2f}'
+                    #     # print(label)
+                    #     plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
+                
+                # plot
+                plot_one_box(xyxy, im0, label=driver_label, color=colors[int(cls)], line_thickness=1)
 
             # Print time (inference + NMS)
             end = time.time()
